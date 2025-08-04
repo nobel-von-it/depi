@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, io};
 
 use clap::{Parser, Subcommand};
 
@@ -158,13 +158,12 @@ impl DepiCommand {
                 let project_name = if let Some(name) = project_name {
                     name.to_string()
                 } else {
-                    fs::canonicalize(&path)
-                        .unwrap()
-                        .file_name()
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                        .to_string()
+                    if let Some(name) = get_project_name_for_init(&path) {
+                        name
+                    } else {
+                        // TODO: rewrite to DepiResult or something like that
+                        panic!("Could not get project name");
+                    }
                 };
                 let deps = if let Some(dependencies) = dependencies.as_ref() {
                     dependencies
@@ -223,6 +222,16 @@ fn construct_cargo_file(
         sb.push_str(&dep.to_cargo_dependency());
     }
     sb
+}
+
+fn get_project_name_for_init(path: &str) -> Option<String> {
+    Some(
+        fs::canonicalize(path)
+            .ok()?
+            .file_name()?
+            .to_str()?
+            .to_string(),
+    )
 }
 
 fn main() {
