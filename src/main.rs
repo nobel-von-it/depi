@@ -1,6 +1,55 @@
 use std::{fs, io};
+use std::collections::HashMap;
 
 use clap::{Parser, Subcommand};
+use miniserde::{json::{self, Object, Array, Value}};
+
+#[derive(Debug)]
+struct CratesIoDependency {
+    name: String,
+    versions: HashMap<String, Vec<String>>,
+}
+
+impl CratesIoDependency {
+    fn from_creates_api(name: &str) -> Option<Self> {
+        let mut creates_io_dep_versions = HashMap::new();
+
+        let url = format!("https://crates.io/api/v1/crates/{}", name);
+        let mut res = ureq::get(&url).header("User-Agent", "depi/0.1.0").call().ok()?;
+        let body = res.body_mut().read_to_string().ok()?;
+
+        let obj: Object = json::from_str(&body).ok()?;
+        if let Some(Value::Array(versions)) = obj.get("versions") {
+            for v in versions {
+                if let Value::Object(v_obj) = v {
+                    let num = if let Some(Value::String(num)) = v_obj.get("num") {
+                        num.to_string()
+                    } else {
+                        continue;
+                    };
+
+                    let mut features = Vec::new();
+                    if let Some(Value::Object(features_obj)) = v_obj.get("features") {
+                        for (f, _) in features_obj {
+                            features.push(f.to_string());
+                        }
+                    } else {
+                        continue;
+                    }
+
+                    creates_io_dep_versions.insert(num, features);
+                }
+            }
+        }
+
+        Some(Self {
+            name: name.to_string(),
+            versions: creates_io_dep_versions,
+        })
+    }
+}
+
+
 
 struct CargoDependency {
     name: String,
@@ -109,6 +158,14 @@ enum DepiCommandVariant {
         #[clap(short = 't', long = "type", default_value = "normal")]
         dep_type: String,
     },
+    Check {
+        #[clap(required = true)]
+        name: String,
+        #[clap(short, long)]
+        version: Option<String>,
+        #[clap(short = 'F', long)]
+        features: Option<String>,
+    },
     List,
     Update,
     Store {
@@ -192,6 +249,49 @@ impl DepiCommand {
 
                 println!("{cargo_toml_file_content}");
                 // fs::write(path + "/Cargo.toml", cargo_toml_file_content).unwrap();
+            }
+            DepiCommandVariant::Check {
+                name,
+                // 1
+                // 1.2
+                // 0.0.0
+                version,
+                features,
+            } => {
+                let crates_io_dep = CratesIoDependency::from_creates_api(&name).unwrap_or_else(|| {
+                    eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
+                    std::process::exit(1);
+                });
+
+                if let Some(version) = version {
+                    if !crates_io_dep.versions.contains_key(version) {
+                        eprintln!("ERROR: in crate {} provided version {} is incorrect", &name, &version);
+                        std::process::exit(1);
+                    }
+                }
+
+                if let Some(features) = features {
+                    let mut contains_f = false;
+                    let mut contains_vs = Vec::new();
+                    for (v, fs) in crates_io_dep.versions {
+                        if fs.contains(features) {
+                            contains_vs.push(v.to_string());
+                            contains_f = true;
+                        }
+                    }
+
+                    if !contains_f {
+                        eprintln!("ERROR: in crate {} provided features {} no exist in any version", &name, &features);
+                        std::process::exit(1);
+                    }
+
+                    println!("INFO: feature {} in:", &features);
+                    println!(" * {:?}", contains_vs);
+
+                    println!();
+                }
+
+                println!("CHECK SUCCESSFUL!");
             }
             _ => (),
         }
