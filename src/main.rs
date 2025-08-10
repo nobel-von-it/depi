@@ -1,8 +1,29 @@
-use std::{fs, io};
+use std::{fs};
 use std::collections::HashMap;
+use std::cmp::{Ord, Ordering};
+use std::fmt::{Display, Formatter, Error};
 
 use clap::{Parser, Subcommand};
 use miniserde::{json::{self, Object, Array, Value}};
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+struct OrdVersion(u32, u32, u32);
+
+impl OrdVersion {
+    fn parse<S: AsRef<str>>(s: S) -> Option<OrdVersion> {
+        let ss = s.as_ref().split(".").collect::<Vec<_>>();
+        if ss.len() != 3 {
+            return None;
+        }
+        Some(Self(ss[0].parse().ok()?, ss[1].parse().ok()?, ss[2].parse().ok()?))
+    }
+}
+
+impl Display for OrdVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        write!(f, "{}.{}.{}", self.0, self.1, self.2)
+    }
+}
 
 #[derive(Debug)]
 struct CratesIoDependency {
@@ -46,6 +67,12 @@ impl CratesIoDependency {
             name: name.to_string(),
             versions: creates_io_dep_versions,
         })
+    }
+    fn get_last_version(&self) -> String {
+        // let mut max
+        // for (v, f) in self.versions {
+        // }
+        self.versions.iter().filter_map(|(v, f)| OrdVersion::parse(v)).max().unwrap().0.to_string()
     }
 }
 
@@ -271,23 +298,23 @@ impl DepiCommand {
                 }
 
                 if let Some(features) = features {
-                    let mut contains_f = false;
-                    let mut contains_vs = Vec::new();
-                    for (v, fs) in crates_io_dep.versions {
-                        if fs.contains(features) {
-                            contains_vs.push(v.to_string());
-                            contains_f = true;
-                        }
-                    }
-
-                    if !contains_f {
-                        eprintln!("ERROR: in crate {} provided features {} no exist in any version", &name, &features);
+                    let req_feats = features.split(",").map(|f| f.trim()).filter(|f| !f.is_empty()).collect::<Vec<_>>();
+                    if req_feats.is_empty() {
+                        eprintln!("ERROR: no valid features provided");
                         std::process::exit(1);
                     }
 
-                    println!("INFO: feature {} in:", &features);
-                    println!(" * {:?}", contains_vs);
+                    let mut comp_vers = crates_io_dep.versions.iter().filter(|(_, avail_feats)| {
+                        req_feats.iter().all(|f| avail_feats.contains(&f.to_string()))
+                    }).map(|(v, _)| v).collect::<Vec<_>>();
+                    if comp_vers.is_empty() {
+                        eprintln!("ERROR: in crate {} none of the versions support all features: {:?}", &name, req_feats);
+                        std::process::exit(1);
+                    }
 
+                    let max_ver = comp_vers.iter().filter_map(|v| OrdVersion::parse(v)).max().unwrap();
+
+                    println!("INFO: provided features contains in {}", max_ver);
                     println!();
                 }
 
