@@ -6,7 +6,7 @@ use std::fmt::{Display, Formatter, Error};
 use clap::{Parser, Subcommand};
 use miniserde::{json::{self, Object, Array, Value}};
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Default)]
 struct OrdVersion(u32, u32, u32);
 
 impl OrdVersion {
@@ -193,6 +193,14 @@ enum DepiCommandVariant {
         #[clap(short = 'F', long)]
         features: Option<String>,
     },
+    Get {
+        #[clap(required = true)]
+        name: String,
+        #[clap(short = 'c', long = "count")]
+        version_count: Option<usize>, 
+        #[clap(short, long)]
+        full: bool,
+    },
     List,
     Update,
     Store {
@@ -319,6 +327,30 @@ impl DepiCommand {
                 }
 
                 println!("CHECK SUCCESSFUL!");
+            }
+            DepiCommandVariant::Get { name, version_count, full } => {
+                let crates_io_dep = CratesIoDependency::from_creates_api(&name).unwrap_or_else(|| {
+                    eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
+                    std::process::exit(1);
+                });
+
+                let mut versions = crates_io_dep.versions.into_iter().collect::<Vec<(_, _)>>();
+                versions.sort_by(|(v1, _), (v2, _)| OrdVersion::parse(v2).unwrap_or_default().cmp(&OrdVersion::parse(v1).unwrap_or_default()));
+                if let Some(take) = version_count {
+                    versions.truncate(*take);
+                }
+
+                println!("DEPENDENCY: ");
+                println!(" * name: {}", &crates_io_dep.name);
+                println!(" * versions: [");
+                for (v, fs) in versions {
+                    if *full {
+                        println!("  * {}: [{}]", v, fs.into_iter().filter(|f| !f.starts_with("_")).collect::<Vec<_>>().join(", "));
+                    } else {
+                        println!("  * {}: [...{} features]", v, fs.len());
+                    }
+                }
+                println!(" ]")
             }
             _ => (),
         }
