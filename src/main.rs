@@ -2,6 +2,8 @@ use std::{fs};
 use std::collections::HashMap;
 use std::cmp::{Ord, Ordering};
 use std::fmt::{Display, Formatter, Error};
+use std::path::{Path, PathBuf};
+use std::env;
 
 use clap::{Parser, Subcommand};
 use miniserde::{json::{self, Object, Array, Value}};
@@ -78,6 +80,7 @@ impl CratesIoDependency {
 
 
 
+#[derive(Debug, Clone)]
 struct CargoDependency {
     name: String,
     version: String,
@@ -105,6 +108,43 @@ impl CargoDependency {
             "{} = {{ version = \"{}\", features = [{}] }}",
             self.name, self.version, features
         )
+    }
+    fn from_cargo<S: AsRef<str>>(s: S, type_: S) -> Option<Self> {
+        let s = s.as_ref().replace("\"", "");
+        let type_ = type_.as_ref().to_string();
+        let (name, attrs) = s.split_once("=").map(|(a, b)| (a.trim(), b.trim()))?;
+        if attrs.contains("{") {
+            // tokio = { features = [...] }
+            // Some(str, str).map(str, Some(str))
+            let (version, attr_features) = attrs.split_once(",").map(|(a, b)| (a.trim(), Some(b.trim()))).unwrap_or(("version = 0.1.0", None));
+            // version = "..."
+            let (_, num) = version.split_once("=").map(|(a, b)| (a.trim(), b.trim()))?;
+            // features = [...] 
+            let features = if let Some(attr_features) = attr_features {
+                let (_, real_features) = attr_features.split_once("=").map(|(a, b)| (a, b.trim().replace("[", "").replace("]", "").replace("}", "")))?;
+                // { features 
+                Some(real_features.split(",").map(|f| f.trim().to_string()).collect::<Vec<_>>())
+            } else {
+                None
+            };
+            return Some(Self {
+                name: name.to_string(),
+                version: num.to_string(),
+
+                features,
+
+                type_,
+            })
+        }
+
+        Some(Self {
+            name: name.to_string(),
+            version: attrs.to_string(),
+
+            features: None,
+
+            type_
+        })
     }
     fn from_provided_str(s: &str) -> Option<Self> {
         // TODO: implement many variants of creation of CargoDependency
@@ -352,9 +392,72 @@ impl DepiCommand {
                 }
                 println!(" ]")
             }
+            DepiCommandVariant::List => {
+                let cargo_content = read_cargo_file(env::current_dir().unwrap()).unwrap();
+                let mut is_dep_block = false;
+                let mut is_dev_dep_block = false;
+
+                let mut deps = Vec::new();
+                let mut dev_deps = Vec::new();
+
+                for line in cargo_content.lines() {
+                    let line = line.trim();
+                    if line.is_empty() || line.starts_with("#") {
+                        continue;
+                    }
+
+                    if line.eq("[dependencies]") {
+                        is_dep_block = true;
+                        is_dev_dep_block = false;
+                        continue;
+                    } else if line.eq("[dev-dependencies]") {
+                        is_dev_dep_block = true;
+                        is_dep_block = false;
+                        continue;
+                    } else if line.starts_with("[") && line.ends_with("]") {
+                        is_dev_dep_block = false;
+                        is_dep_block = false;
+                        continue;
+                    }
+
+                    if is_dep_block {
+                        deps.push(line);
+                    } else if is_dev_dep_block {
+                        dev_deps.push(line);
+                    }
+                }
+
+                for dep in deps {
+                    let cargo_dep = CargoDependency::from_cargo(dep, "normal");
+                    println!("{cargo_dep:#?}");
+                }
+                for ddep in dev_deps {
+                    let cargo_dep = CargoDependency::from_cargo(ddep, "dev");
+                    println!("{cargo_dep:#?}");
+                }
+            }
             _ => (),
         }
     }
+}
+
+fn read_cargo_file<P: AsRef<Path>>(path: P) -> Option<String> {
+    let cargo_path = find_cargo_file(path)?;
+    Some(fs::read_to_string(cargo_path).ok()?)
+}
+
+fn find_cargo_file<P: AsRef<Path>>(path: P) -> Option<PathBuf> {
+    let path = path.as_ref();
+    let files = fs::read_dir(path).ok()?;
+    for file in files.into_iter().flatten() {
+        if file.path().display().to_string().contains("Cargo.toml") {
+            return Some(file.path());
+        }
+    }
+    if let Some(parent) = path.parent() {
+        return find_cargo_file(parent);
+    }
+    None
 }
 
 fn construct_cargo_file(
@@ -395,5 +498,7 @@ fn get_project_name_for_init(path: &str) -> Option<String> {
 
 fn main() {
     let mut command = DepiCommand::parse();
+    // let cur_dir = std::env::current_dir().unwrap();
+    // println!("{:?}", find_cargo_file(cur_dir));
     command.execute();
 }
