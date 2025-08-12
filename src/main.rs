@@ -1,6 +1,6 @@
 use std::{fs};
 use std::collections::HashMap;
-use std::cmp::{Ord, Ordering};
+use std::cmp::{Ord};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::env;
@@ -37,7 +37,7 @@ impl CratesIoDependency {
     fn from_creates_api(name: &str) -> Option<Self> {
         let mut creates_io_dep_versions = HashMap::new();
 
-        let url = format!("https://crates.io/api/v1/crates/{}", name);
+        let url = format!("https://crates.io/api/v1/crates/{name}");
         let mut res = ureq::get(&url).header("User-Agent", "depi/0.1.0").call().ok()?;
         let body = res.body_mut().read_to_string().ok()?;
 
@@ -97,7 +97,7 @@ impl fmt::Display for CargoDependency {
         if let Some(features) = &self.features {
             writeln!(f, "  * features:")?;
             for feat in features.iter() {
-                writeln!(f, "    * {}", feat)?;
+                writeln!(f, "    * {feat}")?;
             }
         }
         Ok(())
@@ -323,13 +323,11 @@ impl DepiCommand {
             } => {
                 let project_name = if let Some(name) = project_name {
                     name.to_string()
+                } else if let Some(name) = get_project_name_for_init(path) {
+                    name
                 } else {
-                    if let Some(name) = get_project_name_for_init(&path) {
-                        name
-                    } else {
-                        // TODO: rewrite to DepiResult or something like that
-                        panic!("Could not get project name");
-                    }
+                    // TODO: rewrite to DepiResult or something like that
+                    panic!("Could not get project name");
                 };
                 let deps = if let Some(dependencies) = dependencies.as_ref() {
                     dependencies
@@ -351,7 +349,7 @@ impl DepiCommand {
                 let cargo_toml_file_content = construct_cargo_file(
                     &project_name,
                     "0.1.0",
-                    &edition,
+                    edition,
                     deps.as_slice(),
                     dev_deps.as_slice(),
                 );
@@ -367,7 +365,7 @@ impl DepiCommand {
                 version,
                 features,
             } => {
-                let crates_io_dep = CratesIoDependency::from_creates_api(&name).unwrap_or_else(|| {
+                let crates_io_dep = CratesIoDependency::from_creates_api(name).unwrap_or_else(|| {
                     eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
                     std::process::exit(1);
                 });
@@ -386,7 +384,7 @@ impl DepiCommand {
                         std::process::exit(1);
                     }
 
-                    let mut comp_vers = crates_io_dep.versions.iter().filter(|(_, avail_feats)| {
+                    let comp_vers = crates_io_dep.versions.iter().filter(|(_, avail_feats)| {
                         req_feats.iter().all(|f| avail_feats.contains(&f.to_string()))
                     }).map(|(v, _)| v).collect::<Vec<_>>();
                     if comp_vers.is_empty() {
@@ -394,16 +392,16 @@ impl DepiCommand {
                         std::process::exit(1);
                     }
 
-                    let max_ver = comp_vers.iter().filter_map(|v| OrdVersion::parse(v)).max().unwrap();
+                    let max_ver = comp_vers.iter().filter_map(OrdVersion::parse).max().unwrap();
 
-                    println!("INFO: provided features contains in {}", max_ver);
+                    println!("INFO: provided features contains in {max_ver}");
                     println!();
                 }
 
                 println!("CHECK SUCCESSFUL!");
             }
             DepiCommandVariant::Get { name, version_count, full } => {
-                let crates_io_dep = CratesIoDependency::from_creates_api(&name).unwrap_or_else(|| {
+                let crates_io_dep = CratesIoDependency::from_creates_api(name).unwrap_or_else(|| {
                     eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
                     std::process::exit(1);
                 });
@@ -485,7 +483,7 @@ impl DepiCommand {
 
 fn read_cargo_file<P: AsRef<Path>>(path: P) -> Option<String> {
     let cargo_path = find_cargo_file(path)?;
-    Some(fs::read_to_string(cargo_path).ok()?)
+    fs::read_to_string(cargo_path).ok()
 }
 
 fn find_cargo_file<P: AsRef<Path>>(path: P) -> Option<PathBuf> {
