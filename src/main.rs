@@ -78,6 +78,20 @@ impl CratesIoDependency {
     }
 }
 
+#[derive(Debug, Clone)]
+enum DepType {
+    Dev,
+    Normal,
+}
+
+impl<S: AsRef<str>> From<S> for DepType {
+    fn from(s: S) -> Self {
+        match s.as_ref() {
+            "dev" | "d" => Self::Dev,
+            _ => Self::Normal
+        }
+    }
+}
 
 
 #[derive(Debug, Clone)]
@@ -87,7 +101,7 @@ struct CargoDependency {
     features: Option<Vec<String>>,
 
     // TODO: replace with enum
-    type_: String,
+    type_: DepType,
 }
 
 impl fmt::Display for CargoDependency {
@@ -126,7 +140,7 @@ impl CargoDependency {
     fn from_cargo<S: AsRef<str>>(s: S, type_: S) -> Option<Self> {
 
         let s = s.as_ref().trim().trim_matches('"');
-        let type_ = type_.as_ref().to_string();
+        let type_ = DepType::from(type_);
         let (name, attrs) = s.split_once("=").map(|(a, b)| (a.trim(), b.trim()))?;
         let name = name.to_string();
 
@@ -186,7 +200,7 @@ impl CargoDependency {
             name: name.to_string(),
             version: version.to_string(),
             features: None,
-            type_: "normal".to_string(),
+            type_: DepType::Normal,
         })
     }
 }
