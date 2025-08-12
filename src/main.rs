@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::env;
 
 use clap::{Parser, Subcommand};
-use miniserde::{json::{self, Object, Array, Value}};
+use miniserde::{json::{self, Object, Value}};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Default)]
 struct OrdVersion(u32, u32, u32);
@@ -74,7 +74,7 @@ impl CratesIoDependency {
         // let mut max
         // for (v, f) in self.versions {
         // }
-        self.versions.iter().filter_map(|(v, f)| OrdVersion::parse(v)).max().unwrap().0.to_string()
+        self.versions.iter().filter_map(|(v, _)| OrdVersion::parse(v)).max().unwrap().0.to_string()
     }
 }
 
@@ -92,12 +92,12 @@ struct CargoDependency {
 
 impl fmt::Display for CargoDependency {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        writeln!(f, "  * {}", &self.name)?;
-        writeln!(f, "  * {}", &self.version)?;
+        writeln!(f, "  * {}:", &self.name)?;
+        writeln!(f, "    * {}", &self.version)?;
         if let Some(features) = &self.features {
-            writeln!(f, "  * features:")?;
+            writeln!(f, "    * features:")?;
             for feat in features.iter() {
-                writeln!(f, "    * {feat}")?;
+                writeln!(f, "      * {feat}")?;
             }
         }
         Ok(())
@@ -124,13 +124,14 @@ impl CargoDependency {
         )
     }
     fn from_cargo<S: AsRef<str>>(s: S, type_: S) -> Option<Self> {
+
         let s = s.as_ref().trim().trim_matches('"');
         let type_ = type_.as_ref().to_string();
         let (name, attrs) = s.split_once("=").map(|(a, b)| (a.trim(), b.trim()))?;
         let name = name.to_string();
 
         if !attrs.contains("{") {
-            let version = attrs.trim_matches(|c| c == '"' || c == '\'').to_string();
+            let version = trim_str(attrs, "\"'").to_string();
             return Some(Self {
                 name,
                 version,
@@ -141,7 +142,7 @@ impl CargoDependency {
             })
         }
 
-        let attrs_body = attrs.trim_start_matches('{').trim_end_matches('}');
+        let attrs_body = trim_sides(attrs, '{', '}');
 
         let mut version = None;
         let mut features = None;
@@ -154,13 +155,10 @@ impl CargoDependency {
             
             match k {
                 "version" => {
-                    version = Some(v.trim_matches(|c| c == '"' || c == '\'').to_string());
+                    version = Some(trim_str(v, "\"'").to_string());
                 },
                 "features" => {
-                    let feature_list = v
-                        .trim_start_matches('[')
-                        .trim_end_matches(']')
-                        .trim_matches(|c| c == '"' || c == '\'')
+                    let feature_list = trim_str(trim_sides(v, '[', ']'), "\"'")
                         .split(',')
                         .map(|f| f.trim().to_string())
                         .filter(|f| !f.is_empty())
@@ -191,6 +189,13 @@ impl CargoDependency {
             type_: "normal".to_string(),
         })
     }
+}
+
+fn trim_sides<'a>(s: &'a str, left: char, right: char) -> &'a str {
+    s.trim_start_matches(left).trim_end_matches(right)
+}
+fn trim_str<'a>(s: &'a str, t: &'a str) -> &'a str {
+    s.trim_matches(|c| t.contains(c))
 }
 
 #[derive(Debug, Parser)]
