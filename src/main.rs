@@ -1,7 +1,7 @@
 use std::{fs};
 use std::collections::HashMap;
 use std::cmp::{Ord, Ordering};
-use std::fmt::{Display, Formatter, Error};
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::env;
 
@@ -21,8 +21,8 @@ impl OrdVersion {
     }
 }
 
-impl Display for OrdVersion {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+impl fmt::Display for OrdVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "{}.{}.{}", self.0, self.1, self.2)
     }
 }
@@ -90,6 +90,20 @@ struct CargoDependency {
     type_: String,
 }
 
+impl fmt::Display for CargoDependency {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        writeln!(f, "  * {}", &self.name)?;
+        writeln!(f, "  * {}", &self.version)?;
+        if let Some(features) = &self.features {
+            writeln!(f, "  * features:")?;
+            for feat in features.iter() {
+                writeln!(f, "    * {}", feat)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl CargoDependency {
     fn to_cargo_dependency(&self) -> String {
         if self.features.is_none() {
@@ -110,40 +124,60 @@ impl CargoDependency {
         )
     }
     fn from_cargo<S: AsRef<str>>(s: S, type_: S) -> Option<Self> {
-        let s = s.as_ref().replace("\"", "");
+        let s = s.as_ref().trim().trim_matches('"');
         let type_ = type_.as_ref().to_string();
         let (name, attrs) = s.split_once("=").map(|(a, b)| (a.trim(), b.trim()))?;
-        if attrs.contains("{") {
-            // tokio = { features = [...] }
-            // Some(str, str).map(str, Some(str))
-            let (version, attr_features) = attrs.split_once(",").map(|(a, b)| (a.trim(), Some(b.trim()))).unwrap_or(("version = 0.1.0", None));
-            // version = "..."
-            let (_, num) = version.split_once("=").map(|(a, b)| (a.trim(), b.trim()))?;
-            // features = [...] 
-            let features = if let Some(attr_features) = attr_features {
-                let (_, real_features) = attr_features.split_once("=").map(|(a, b)| (a, b.trim().replace("[", "").replace("]", "").replace("}", "")))?;
-                // { features 
-                Some(real_features.split(",").map(|f| f.trim().to_string()).collect::<Vec<_>>())
-            } else {
-                None
-            };
+        let name = name.to_string();
+
+        if !attrs.contains("{") {
+            let version = attrs.trim_matches(|c| c == '"' || c == '\'').to_string();
             return Some(Self {
-                name: name.to_string(),
-                version: num.to_string(),
+                name,
+                version,
 
-                features,
+                features: None,
 
-                type_,
+                type_
             })
         }
 
+        let attrs_body = attrs.trim_start_matches('{').trim_end_matches('}');
+
+        let mut version = None;
+        let mut features = None;
+
+        for pair in attrs_body.split(',') {
+            let pair = pair.trim();
+            if pair.is_empty() { continue; }
+
+            let (k, v) = pair.split_once('=').map(|(k, v)| (k.trim(), v.trim()))?;
+            
+            match k {
+                "version" => {
+                    version = Some(v.trim_matches(|c| c == '"' || c == '\'').to_string());
+                },
+                "features" => {
+                    let feature_list = v
+                        .trim_start_matches('[')
+                        .trim_end_matches(']')
+                        .trim_matches(|c| c == '"' || c == '\'')
+                        .split(',')
+                        .map(|f| f.trim().to_string())
+                        .filter(|f| !f.is_empty())
+                        .collect::<Vec<_>>();
+                    features = Some(feature_list);
+                },
+                _ => {}
+            }
+        }
+
+        let version = version.unwrap_or("0.1.0".to_string());
+
         Some(Self {
-            name: name.to_string(),
-            version: attrs.to_string(),
-
-            features: None,
-
-            type_
+            name,
+            version,
+            features,
+            type_,
         })
     }
     fn from_provided_str(s: &str) -> Option<Self> {
@@ -427,14 +461,22 @@ impl DepiCommand {
                     }
                 }
 
+                
+                println!("DEPENDENCIES:");
                 for dep in deps {
-                    let cargo_dep = CargoDependency::from_cargo(dep, "normal");
-                    println!("{cargo_dep:#?}");
+                    if let Some(cargo_dep) = CargoDependency::from_cargo(dep, "normal") {
+                        println!("{}", &cargo_dep)
+                    }
                 }
+                println!();
+
+                println!("DEV-DEPENDENCIES:");
                 for ddep in dev_deps {
-                    let cargo_dep = CargoDependency::from_cargo(ddep, "dev");
-                    println!("{cargo_dep:#?}");
+                    if let Some(cargo_dep) = CargoDependency::from_cargo(ddep, "dev") {
+                        println!("{}", &cargo_dep)
+                    }
                 }
+                println!();
             }
             _ => (),
         }
