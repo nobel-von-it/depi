@@ -4,6 +4,7 @@ use std::cmp::{Ord};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::env;
+use std::io::Write;
 
 use clap::{Parser, Subcommand};
 use miniserde::{json::{self, Object, Value}};
@@ -276,7 +277,10 @@ enum DepiCommandVariant {
         dep_features: Option<String>,
         // TODO: replace with enum
         #[clap(short = 't', long = "type", default_value = "normal")]
-        dep_type: String,
+        dep_type: DepType,
+
+        #[clap(long = "trust")]
+        trust_me: bool,
     },
     Check {
         #[clap(required = true)]
@@ -375,7 +379,73 @@ impl DepiCommand {
 
                 println!("{cargo_toml_file_content}");
                 // fs::write(path + "/Cargo.toml", cargo_toml_file_content).unwrap();
-            }
+            },
+            DepiCommandVariant::Add {
+                path,
+                dep_name,
+                dep_version,
+                dep_features,
+                dep_type,
+                trust_me,
+            } => {
+                // &Option<String> != &str
+                let cargo_content = read_cargo_file(path.as_deref().unwrap_or(".")).unwrap();
+                let dep_name = dep_name.to_string();
+
+                let mut lines = cargo_content.lines().map(|l| l.to_string()).collect::<Vec<_>>();
+
+                let mut dep_name_list = Vec::new();
+                let mut in_dep = false;
+                let mut start_deps = 0;
+                for (i, line) in lines.iter().enumerate() {
+
+                    if line.is_empty() || line.starts_with("#") {
+                        continue;
+                    }
+
+                    if line.eq(&"[dependencies]") {
+                        start_deps = i + 1;
+                        in_dep = true;
+                        continue;
+                    } else if line.eq(&"[dev-dependencies]") {
+                        in_dep = false;
+                        continue;
+                    }
+
+
+                    if in_dep {
+                        let (name, _) = line.split_once("=").map(|(v, i)| (v.trim(), i)).unwrap();
+                        dep_name_list.push(name.to_string());
+                    }
+                }
+
+                let mut index = 0;
+                for i in 0..dep_name_list.len() {
+                    if i == 0 {
+                        if dep_name < dep_name_list[i] {
+                            index = 0;
+                            break;
+                        }
+                    } else if dep_name_list[i-1] < dep_name && dep_name_list[i] > dep_name {
+                        index = i;
+                        break;
+                    } else if i == dep_name_list.len()-1 {
+                        index = dep_name_list.len();
+                        break;
+                    }
+                }
+
+                lines.insert(start_deps + index, format!("{} = blublu", &dep_name));
+                // println!("{start_deps} {index}");
+                // println!("{lines:#?}");
+
+                let mut cargo_file = open_cargo_file_rw(path.as_deref().unwrap_or(".")).unwrap();
+                cargo_file.set_len(0).unwrap();
+                for line in lines {
+                    cargo_file.write_all(line.as_bytes()).unwrap();
+                    cargo_file.write_all(b"\n").unwrap();
+                }
+            },
             DepiCommandVariant::Check {
                 name,
                 // 1
@@ -498,6 +568,11 @@ impl DepiCommand {
             _ => (),
         }
     }
+}
+
+fn open_cargo_file_rw<P: AsRef<Path>>(path: P) -> Option<fs::File> {
+    let cargo_path = find_cargo_file(path)?;
+    fs::File::options().read(true).write(true).create(true).open(cargo_path).ok()
 }
 
 fn read_cargo_file<P: AsRef<Path>>(path: P) -> Option<String> {
