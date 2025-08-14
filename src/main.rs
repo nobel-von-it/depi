@@ -35,7 +35,7 @@ struct CratesIoDependency {
 }
 
 impl CratesIoDependency {
-    fn from_creates_api(name: &str) -> Option<Self> {
+    fn from_crates_api(name: &str) -> Option<Self> {
         let mut creates_io_dep_versions = HashMap::new();
 
         let url = format!("https://crates.io/api/v1/crates/{name}");
@@ -75,7 +75,7 @@ impl CratesIoDependency {
         // let mut max
         // for (v, f) in self.versions {
         // }
-        self.versions.iter().filter_map(|(v, _)| OrdVersion::parse(v)).max().unwrap().0.to_string()
+        self.versions.iter().filter_map(|(v, _)| OrdVersion::parse(v)).max().unwrap().to_string()
     }
 }
 
@@ -120,6 +120,14 @@ impl fmt::Display for CargoDependency {
 }
 
 impl CargoDependency {
+    fn new(name: String, version: String, features: Option<Vec<String>>, type_: DepType) -> Self {
+        Self {
+            name,
+            version,
+            features,
+            type_,
+        }
+    }
     fn to_cargo_dependency(&self) -> String {
         if self.features.is_none() {
             return format!("{} = \"{}\"", self.name, self.version);
@@ -383,68 +391,103 @@ impl DepiCommand {
             DepiCommandVariant::Add {
                 path,
                 dep_name,
+                // None -> latest
                 dep_version,
+                // None -> default_features
                 dep_features,
+                // dev -> Dev, other -> Normal
                 dep_type,
                 trust_me,
             } => {
                 // &Option<String> != &str
-                let cargo_content = read_cargo_file(path.as_deref().unwrap_or(".")).unwrap();
+                let path = path.as_deref().unwrap_or(".");
                 let dep_name = dep_name.to_string();
 
-                let mut lines = cargo_content.lines().map(|l| l.to_string()).collect::<Vec<_>>();
+                let (dep_names, dev_dep_names) = get_dev_and_deps_names_from_cargo(path).unwrap();
 
-                let mut dep_name_list = Vec::new();
-                let mut in_dep = false;
-                let mut start_deps = 0;
-                for (i, line) in lines.iter().enumerate() {
-
-                    if line.is_empty() || line.starts_with("#") {
-                        continue;
-                    }
-
-                    if line.eq(&"[dependencies]") {
-                        start_deps = i + 1;
-                        in_dep = true;
-                        continue;
-                    } else if line.eq(&"[dev-dependencies]") {
-                        in_dep = false;
-                        continue;
-                    }
-
-
-                    if in_dep {
-                        let (name, _) = line.split_once("=").map(|(v, i)| (v.trim(), i)).unwrap();
-                        dep_name_list.push(name.to_string());
-                    }
+                if dep_names.unwrap_or_default().contains(&dep_name) {
+                    println!("Deps already in [DEPENDENCIES]");
+                    return;
+                }
+                if dev_dep_names.unwrap_or_default().contains(&dep_name) {
+                    println!("Deps already in [DEV-DEPENDENCIES]");
+                    return;
                 }
 
-                let mut index = 0;
-                for i in 0..dep_name_list.len() {
-                    if i == 0 {
-                        if dep_name < dep_name_list[i] {
-                            index = 0;
-                            break;
+
+                let cargo_dependency = if !trust_me {
+
+                    let crates_io_dep = if let Some(res) = CratesIoDependency::from_crates_api(&dep_name) {
+                        res
+                    } else {
+                        eprintln!("Invalid dependency name provided");
+                        return;
+                    };
+                    // Name is valid
+
+                    let cargo_version = if let Some(dep_version_provided) = dep_version {
+                        if !crates_io_dep.versions.contains_key(dep_version_provided) {
+                            eprintln!("Invalid dependency version provided");
+                            return;
                         }
-                    } else if dep_name_list[i-1] < dep_name && dep_name_list[i] > dep_name {
-                        index = i;
-                        break;
-                    } else if i == dep_name_list.len()-1 {
-                        index = dep_name_list.len();
-                        break;
-                    }
-                }
+                        dep_version_provided.to_string()
+                    } else {
+                        crates_io_dep.get_last_version()
+                    };
+                    // Version is valid
 
-                lines.insert(start_deps + index, format!("{} = blublu", &dep_name));
+                    let mut cargo_features = None;
+                    if let Some(dep_features_provided) = dep_features {
+                        // no way
+                        let crates_features = crates_io_dep.versions.get(&cargo_version).unwrap();
+                        let mut valid_features = true;
+                        for feat in dep_features_provided.split(",") {
+                            let feat = feat.trim();
+                            if !crates_features.contains(&feat.to_string()) {
+                                valid_features = false;
+                                break;
+                            }
+                        }
+                        if valid_features {
+                            cargo_features = Some(dep_features_provided.split(",").map(|f| f.trim().to_string()).collect::<Vec<_>>());
+                        }
+                    }
+                    // Features are valid
+
+                    CargoDependency::new(dep_name, cargo_version, cargo_features, dep_type.clone())
+                } else {
+                    todo!()
+                };
+
+                println!("{}", cargo_dependency.to_cargo_dependency());
+
+
+                // let mut index = 0;
+                // for i in 0..dep_name_list.len() {
+                //     if i == 0 {
+                //         if dep_name < dep_name_list[i] {
+                //             index = 0;
+                //             break;
+                //         }
+                //     } else if dep_name_list[i-1] < dep_name && dep_name_list[i] > dep_name {
+                //         index = i;
+                //         break;
+                //     } else if i == dep_name_list.len()-1 {
+                //         index = dep_name_list.len();
+                //         break;
+                //     }
+                // }
+                //
+                // lines.insert(start_deps + index, format!("{} = blublu", &dep_name));
                 // println!("{start_deps} {index}");
                 // println!("{lines:#?}");
 
-                let mut cargo_file = open_cargo_file_rw(path.as_deref().unwrap_or(".")).unwrap();
-                cargo_file.set_len(0).unwrap();
-                for line in lines {
-                    cargo_file.write_all(line.as_bytes()).unwrap();
-                    cargo_file.write_all(b"\n").unwrap();
-                }
+                // let mut cargo_file = open_cargo_file_rw(path.as_deref().unwrap_or(".")).unwrap();
+                // cargo_file.set_len(0).unwrap();
+                // for line in lines {
+                //     cargo_file.write_all(line.as_bytes()).unwrap();
+                //     cargo_file.write_all(b"\n").unwrap();
+                // }
             },
             DepiCommandVariant::Check {
                 name,
@@ -454,7 +497,7 @@ impl DepiCommand {
                 version,
                 features,
             } => {
-                let crates_io_dep = CratesIoDependency::from_creates_api(name).unwrap_or_else(|| {
+                let crates_io_dep = CratesIoDependency::from_crates_api(name).unwrap_or_else(|| {
                     eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
                     std::process::exit(1);
                 });
@@ -490,7 +533,7 @@ impl DepiCommand {
                 println!("CHECK SUCCESSFUL!");
             }
             DepiCommandVariant::Get { name, version_count, full } => {
-                let crates_io_dep = CratesIoDependency::from_creates_api(name).unwrap_or_else(|| {
+                let crates_io_dep = CratesIoDependency::from_crates_api(name).unwrap_or_else(|| {
                     eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
                     std::process::exit(1);
                 });
@@ -514,60 +557,115 @@ impl DepiCommand {
                 println!(" ]")
             }
             DepiCommandVariant::List => {
-                let cargo_content = read_cargo_file(env::current_dir().unwrap()).unwrap();
-                let mut is_dep_block = false;
-                let mut is_dev_dep_block = false;
+                let (deps, dev_deps) = get_dev_and_deps_lines_from_cargo(env::current_dir().unwrap_or(".".into())).unwrap();
 
-                let mut deps = Vec::new();
-                let mut dev_deps = Vec::new();
-
-                for line in cargo_content.lines() {
-                    let line = line.trim();
-                    if line.is_empty() || line.starts_with("#") {
-                        continue;
+                if let Some(deps) = deps {
+                    println!("DEPENDENCIES:");
+                    for dep in deps {
+                        if let Some(cargo_dep) = CargoDependency::from_cargo(dep.as_str(), "normal") {
+                            println!("{}", &cargo_dep)
+                        }
                     }
-
-                    if line.eq("[dependencies]") {
-                        is_dep_block = true;
-                        is_dev_dep_block = false;
-                        continue;
-                    } else if line.eq("[dev-dependencies]") {
-                        is_dev_dep_block = true;
-                        is_dep_block = false;
-                        continue;
-                    } else if line.starts_with("[") && line.ends_with("]") {
-                        is_dev_dep_block = false;
-                        is_dep_block = false;
-                        continue;
-                    }
-
-                    if is_dep_block {
-                        deps.push(line);
-                    } else if is_dev_dep_block {
-                        dev_deps.push(line);
-                    }
+                    println!();
                 }
 
-                
-                println!("DEPENDENCIES:");
-                for dep in deps {
-                    if let Some(cargo_dep) = CargoDependency::from_cargo(dep, "normal") {
-                        println!("{}", &cargo_dep)
+                if let Some(dev_deps) = dev_deps {
+                    println!("DEV-DEPENDENCIES:");
+                    for ddep in dev_deps {
+                        if let Some(cargo_dep) = CargoDependency::from_cargo(ddep.as_str(), "dev") {
+                            println!("{}", &cargo_dep)
+                        }
                     }
+                    println!();
                 }
-                println!();
-
-                println!("DEV-DEPENDENCIES:");
-                for ddep in dev_deps {
-                    if let Some(cargo_dep) = CargoDependency::from_cargo(ddep, "dev") {
-                        println!("{}", &cargo_dep)
-                    }
-                }
-                println!();
             }
             _ => (),
         }
     }
+}
+
+fn get_dev_and_deps_names_from_cargo<P: AsRef<Path>>(path: P) -> Option<(Option<Vec<String>>, Option<Vec<String>>)> {
+    let (deps, dev_deps) = get_dev_and_deps_lines_from_cargo(path)?;
+
+    let mut dep_names = Vec::new();
+    let mut dev_dep_names = Vec::new();
+
+    if let Some(deps) = deps {
+        for dep in deps {
+            let (name, _) = dep.split_once("=").map(|(n, a)| (n.trim(), a))?;
+            dep_names.push(name.to_string());
+        }
+    }
+    if let Some(dev_deps) = dev_deps {
+        for ddep in dev_deps {
+            let (name, _) = ddep.split_once("=").map(|(n, a)| (n.trim(), a))?;
+            dev_dep_names.push(name.to_string());
+        }
+    }
+
+    let dep_names = if dep_names.is_empty() {
+        None
+    } else {
+        Some(dep_names)
+    };
+    let dev_dep_names = if dev_dep_names.is_empty() {
+        None
+    } else {
+        Some(dev_dep_names)
+    };
+
+    Some((dep_names, dev_dep_names))
+}
+
+fn get_dev_and_deps_lines_from_cargo<P: AsRef<Path>>(path: P) -> Option<(Option<Vec<String>>, Option<Vec<String>>)> {
+    let cargo_content = read_cargo_file(path)?;
+
+    let mut is_dep_block = false;
+    let mut is_dev_dep_block = false;
+
+    let mut deps = Vec::new();
+    let mut dev_deps = Vec::new();
+
+    for line in cargo_content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("#") {
+            continue;
+        }
+
+        if line.eq("[dependencies]") {
+            is_dep_block = true;
+            is_dev_dep_block = false;
+            continue;
+        } else if line.eq("[dev-dependencies]") {
+            is_dev_dep_block = true;
+            is_dep_block = false;
+            continue;
+        } else if line.starts_with("[") && line.ends_with("]") {
+            is_dev_dep_block = false;
+            is_dep_block = false;
+            continue;
+        }
+
+        if is_dep_block {
+            deps.push(line.to_string());
+        } else if is_dev_dep_block {
+            dev_deps.push(line.to_string());
+        }
+    }
+
+    let deps = if deps.is_empty() {
+        None
+    } else {
+        Some(deps)
+    };
+    let dev_deps = if dev_deps.is_empty() {
+        None
+    } else {
+        Some(dev_deps)
+    };
+
+
+    Some((deps, dev_deps))
 }
 
 fn open_cargo_file_rw<P: AsRef<Path>>(path: P) -> Option<fs::File> {
