@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
@@ -131,14 +130,6 @@ impl fmt::Display for CargoDependency {
 }
 
 impl CargoDependency {
-    fn new(name: String, version: String, features: Option<Vec<String>>, type_: DepType) -> Self {
-        Self {
-            name,
-            version,
-            features,
-            type_,
-        }
-    }
     fn to_cargo_dependency(&self) -> String {
         if self.features.is_none() {
             return format!("{} = \"{}\"", self.name, self.version);
@@ -294,7 +285,7 @@ impl CargoDependency {
     }
 }
 
-fn trim_sides<'a>(s: &'a str, left: char, right: char) -> &'a str {
+fn trim_sides(s: &str, left: char, right: char) -> &str {
     s.trim_start_matches(left).trim_end_matches(right)
 }
 fn trim_str<'a>(s: &'a str, t: &'a str) -> &'a str {
@@ -709,7 +700,7 @@ impl DepiCommand {
 
 fn append_dep_to_cargo_file<P: AsRef<Path>>(path: P, cd: CargoDependency) -> Option<()> {
     let cargo_path = find_cargo_file(path)?;
-    let cargo_content = read_cargo_file_unchecked(&cargo_path)?;
+    let cargo_content = read_cargo_file(&cargo_path)?;
 
     let section_name = match cd.type_ {
         DepType::Normal => "[dependencies]",
@@ -763,7 +754,7 @@ fn get_dev_and_deps_lines_from_cargo<P: AsRef<Path>>(
     path: P,
 ) -> Option<(Vec<String>, Vec<String>)> {
     let path = find_cargo_file(path)?;
-    let content = read_cargo_file_unchecked(path)?;
+    let content = read_cargo_file(path)?;
 
     get_dev_and_deps_lines_from_cargo_content(content)
 }
@@ -809,22 +800,7 @@ fn get_dev_and_deps_lines_from_cargo_content<S: AsRef<str>>(
     Some((deps, dev_deps))
 }
 
-fn open_cargo_file_rw<P: AsRef<Path>>(path: P) -> Option<fs::File> {
-    let cargo_path = find_cargo_file(path)?;
-    fs::File::options()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(cargo_path)
-        .ok()
-}
-
 fn read_cargo_file<P: AsRef<Path>>(path: P) -> Option<String> {
-    let cargo_path = find_cargo_file(path)?;
-    fs::read_to_string(cargo_path).ok()
-}
-
-fn read_cargo_file_unchecked<P: AsRef<Path>>(path: P) -> Option<String> {
     fs::read_to_string(path).ok()
 }
 
