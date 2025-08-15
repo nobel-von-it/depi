@@ -1,13 +1,13 @@
-use std::{fs};
+use std::cmp::Ord;
 use std::collections::HashMap;
-use std::cmp::{Ord};
-use std::fmt;
-use std::path::{Path, PathBuf};
 use std::env;
+use std::fmt;
+use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use miniserde::{json::{self, Object, Value}};
+use miniserde::json::{self, Object, Value};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Default)]
 struct OrdVersion(u32, u32, u32);
@@ -18,7 +18,11 @@ impl OrdVersion {
         if ss.len() != 3 {
             return None;
         }
-        Some(Self(ss[0].parse().ok()?, ss[1].parse().ok()?, ss[2].parse().ok()?))
+        Some(Self(
+            ss[0].parse().ok()?,
+            ss[1].parse().ok()?,
+            ss[2].parse().ok()?,
+        ))
     }
 }
 
@@ -39,7 +43,10 @@ impl CratesIoDependency {
         let mut creates_io_dep_versions = HashMap::new();
 
         let url = format!("https://crates.io/api/v1/crates/{name}");
-        let mut res = ureq::get(&url).header("User-Agent", "depi/0.1.0").call().ok()?;
+        let mut res = ureq::get(&url)
+            .header("User-Agent", "depi/0.1.0")
+            .call()
+            .ok()?;
         let body = res.body_mut().read_to_string().ok()?;
 
         let obj: Object = json::from_str(&body).ok()?;
@@ -75,7 +82,12 @@ impl CratesIoDependency {
         // let mut max
         // for (v, f) in self.versions {
         // }
-        self.versions.iter().filter_map(|(v, _)| OrdVersion::parse(v)).max().unwrap().to_string()
+        self.versions
+            .iter()
+            .filter_map(|(v, _)| OrdVersion::parse(v))
+            .max()
+            .unwrap()
+            .to_string()
     }
 }
 
@@ -89,11 +101,10 @@ impl<S: AsRef<str>> From<S> for DepType {
     fn from(s: S) -> Self {
         match s.as_ref() {
             "dev" | "d" => Self::Dev,
-            _ => Self::Normal
+            _ => Self::Normal,
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 struct CargoDependency {
@@ -146,8 +157,75 @@ impl CargoDependency {
             self.name, self.version, features
         )
     }
-    fn from_cargo<S: AsRef<str>>(s: S, type_: S) -> Option<Self> {
+    fn create_with_add_fields_checked(
+        dep_name: &str,
+        dep_version: Option<&str>,
+        dep_features: Option<&str>,
+        dep_type: DepType,
+    ) -> Option<Self> {
+        let crates_io_dep = CratesIoDependency::from_crates_api(dep_name)?;
 
+        let cargo_version = if let Some(dep_version_provided) = dep_version {
+            if !crates_io_dep.versions.contains_key(dep_version_provided) {
+                eprintln!("Invalid dependency version provided");
+                return None;
+            }
+            dep_version_provided.to_string()
+        } else {
+            crates_io_dep.get_last_version()
+        };
+
+        let mut cargo_features = None;
+        if let Some(dep_features_provided) = dep_features {
+            // no way
+            let crates_features = crates_io_dep.versions.get(&cargo_version).unwrap();
+            if dep_features_provided
+                .split(",")
+                .map(|f| f.trim())
+                .all(|f| crates_features.contains(&f.to_string()))
+            {
+                cargo_features = Some(
+                    dep_features_provided
+                        .split(",")
+                        .map(|f| f.trim().to_string())
+                        .collect::<Vec<_>>(),
+                );
+            } else {
+                eprintln!("Invalid dependency features provided");
+                return None;
+            }
+        }
+
+        Some(Self {
+            name: dep_name.to_string(),
+            version: cargo_version,
+            features: cargo_features,
+            type_: dep_type,
+        })
+    }
+    fn create_with_add_fields_unchecked(
+        dep_name: &str,
+        dep_version: &str,
+        dep_features: Option<&str>,
+        dep_type: DepType,
+    ) -> Self {
+        let name = dep_name.to_string();
+        let version = dep_version.to_string();
+        let features = dep_features.map(|features| {
+            features
+                .split(",")
+                .map(|f| f.trim().to_string())
+                .collect::<Vec<_>>()
+        });
+
+        Self {
+            name,
+            version,
+            features,
+            type_: dep_type,
+        }
+    }
+    fn from_cargo<S: AsRef<str>>(s: S, type_: S) -> Option<Self> {
         let s = s.as_ref().trim().trim_matches('"');
         let type_ = DepType::from(type_);
         let (name, attrs) = s.split_once("=").map(|(a, b)| (a.trim(), b.trim()))?;
@@ -161,8 +239,8 @@ impl CargoDependency {
 
                 features: None,
 
-                type_
-            })
+                type_,
+            });
         }
 
         let attrs_body = trim_sides(attrs, '{', '}');
@@ -172,14 +250,16 @@ impl CargoDependency {
 
         for pair in attrs_body.split(',') {
             let pair = pair.trim();
-            if pair.is_empty() { continue; }
+            if pair.is_empty() {
+                continue;
+            }
 
             let (k, v) = pair.split_once('=').map(|(k, v)| (k.trim(), v.trim()))?;
-            
+
             match k {
                 "version" => {
                     version = Some(trim_str(v, "\"'").to_string());
-                },
+                }
                 "features" => {
                     let feature_list = trim_str(trim_sides(v, '[', ']'), "\"'")
                         .split(',')
@@ -187,7 +267,7 @@ impl CargoDependency {
                         .filter(|f| !f.is_empty())
                         .collect::<Vec<_>>();
                     features = Some(feature_list);
-                },
+                }
                 _ => {}
             }
         }
@@ -302,7 +382,7 @@ enum DepiCommandVariant {
         #[clap(required = true)]
         name: String,
         #[clap(short = 'c', long = "count")]
-        version_count: Option<usize>, 
+        version_count: Option<usize>,
         #[clap(short, long)]
         full: bool,
     },
@@ -387,7 +467,7 @@ impl DepiCommand {
 
                 println!("{cargo_toml_file_content}");
                 // fs::write(path + "/Cargo.toml", cargo_toml_file_content).unwrap();
-            },
+            }
             DepiCommandVariant::Add {
                 path,
                 dep_name,
@@ -401,66 +481,62 @@ impl DepiCommand {
             } => {
                 // &Option<String> != &str
                 let path = path.as_deref().unwrap_or(".");
-                let dep_name = dep_name.to_string();
-
-                let (dep_names, dev_dep_names) = get_dev_and_deps_names_from_cargo(path).unwrap();
-
-                if dep_names.unwrap_or_default().contains(&dep_name) {
-                    println!("Deps already in [DEPENDENCIES]");
-                    return;
-                }
-                if dev_dep_names.unwrap_or_default().contains(&dep_name) {
-                    println!("Deps already in [DEV-DEPENDENCIES]");
-                    return;
-                }
-
 
                 let cargo_dependency = if !trust_me {
-
-                    let crates_io_dep = if let Some(res) = CratesIoDependency::from_crates_api(&dep_name) {
-                        res
+                    CargoDependency::create_with_add_fields_checked(
+                        dep_name.as_str(),
+                        dep_version.as_deref(),
+                        dep_features.as_deref(),
+                        dep_type.clone(),
+                    )
+                    .unwrap()
+                } else {
+                    let version = if let Some(v) = dep_version {
+                        v
                     } else {
-                        eprintln!("Invalid dependency name provided");
+                        eprintln!("Cannot trust, version required");
                         return;
                     };
-                    // Name is valid
 
-                    let cargo_version = if let Some(dep_version_provided) = dep_version {
-                        if !crates_io_dep.versions.contains_key(dep_version_provided) {
-                            eprintln!("Invalid dependency version provided");
-                            return;
-                        }
-                        dep_version_provided.to_string()
-                    } else {
-                        crates_io_dep.get_last_version()
-                    };
-                    // Version is valid
-
-                    let mut cargo_features = None;
-                    if let Some(dep_features_provided) = dep_features {
-                        // no way
-                        let crates_features = crates_io_dep.versions.get(&cargo_version).unwrap();
-                        let mut valid_features = true;
-                        for feat in dep_features_provided.split(",") {
-                            let feat = feat.trim();
-                            if !crates_features.contains(&feat.to_string()) {
-                                valid_features = false;
-                                break;
-                            }
-                        }
-                        if valid_features {
-                            cargo_features = Some(dep_features_provided.split(",").map(|f| f.trim().to_string()).collect::<Vec<_>>());
-                        }
-                    }
-                    // Features are valid
-
-                    CargoDependency::new(dep_name, cargo_version, cargo_features, dep_type.clone())
-                } else {
-                    todo!()
+                    CargoDependency::create_with_add_fields_unchecked(
+                        dep_name.as_str(),
+                        version,
+                        dep_features.as_deref(),
+                        dep_type.clone(),
+                    )
                 };
 
                 println!("{}", cargo_dependency.to_cargo_dependency());
 
+                append_dep_to_cargo_file(path, cargo_dependency).unwrap();
+
+                // let (dep_names, dev_dep_names) = get_dev_and_deps_names_from_cargo(path).unwrap();
+                // // TODO: rewrite
+                // let mut dep_names = dep_names.unwrap_or_default();
+                // let mut dev_dep_names = dev_dep_names.unwrap_or_default();
+                //
+                // match dep_type {
+                //     DepType::Normal => {
+                //         match dep_names.binary_search(dep_name) {
+                //             Ok(_) => {
+                //                 println!("Provided dependency already in DEPENDENCIES");
+                //                 return;
+                //             }
+                //             Err(idx) => dep_names.insert(idx, dep_name.to_string()),
+                //         }
+                //         println!("{dep_names:#?}");
+                //     }
+                //     DepType::Dev => {
+                //         match dev_dep_names.binary_search(dep_name) {
+                //             Ok(_) => {
+                //                 println!("Provided dependency already in DEV-DEPENDENCIES");
+                //                 return;
+                //             }
+                //             Err(idx) => dev_dep_names.insert(idx, dep_name.to_string()),
+                //         }
+                //         println!("{dev_dep_names:#?}");
+                //     }
+                // }
 
                 // let mut index = 0;
                 // for i in 0..dep_name_list.len() {
@@ -488,7 +564,7 @@ impl DepiCommand {
                 //     cargo_file.write_all(line.as_bytes()).unwrap();
                 //     cargo_file.write_all(b"\n").unwrap();
                 // }
-            },
+            }
             DepiCommandVariant::Check {
                 name,
                 // 1
@@ -497,34 +573,59 @@ impl DepiCommand {
                 version,
                 features,
             } => {
-                let crates_io_dep = CratesIoDependency::from_crates_api(name).unwrap_or_else(|| {
-                    eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
-                    std::process::exit(1);
-                });
+                let crates_io_dep =
+                    CratesIoDependency::from_crates_api(name).unwrap_or_else(|| {
+                        eprintln!(
+                            "ERROR: CratesIoDependency::from_creates_api with value {}",
+                            &name
+                        );
+                        std::process::exit(1);
+                    });
 
                 if let Some(version) = version {
                     if !crates_io_dep.versions.contains_key(version) {
-                        eprintln!("ERROR: in crate {} provided version {} is incorrect", &name, &version);
+                        eprintln!(
+                            "ERROR: in crate {} provided version {} is incorrect",
+                            &name, &version
+                        );
                         std::process::exit(1);
                     }
                 }
 
                 if let Some(features) = features {
-                    let req_feats = features.split(",").map(|f| f.trim()).filter(|f| !f.is_empty()).collect::<Vec<_>>();
+                    let req_feats = features
+                        .split(",")
+                        .map(|f| f.trim())
+                        .filter(|f| !f.is_empty())
+                        .collect::<Vec<_>>();
                     if req_feats.is_empty() {
                         eprintln!("ERROR: no valid features provided");
                         std::process::exit(1);
                     }
 
-                    let comp_vers = crates_io_dep.versions.iter().filter(|(_, avail_feats)| {
-                        req_feats.iter().all(|f| avail_feats.contains(&f.to_string()))
-                    }).map(|(v, _)| v).collect::<Vec<_>>();
+                    let comp_vers = crates_io_dep
+                        .versions
+                        .iter()
+                        .filter(|(_, avail_feats)| {
+                            req_feats
+                                .iter()
+                                .all(|f| avail_feats.contains(&f.to_string()))
+                        })
+                        .map(|(v, _)| v)
+                        .collect::<Vec<_>>();
                     if comp_vers.is_empty() {
-                        eprintln!("ERROR: in crate {} none of the versions support all features: {:?}", &name, req_feats);
+                        eprintln!(
+                            "ERROR: in crate {} none of the versions support all features: {:?}",
+                            &name, req_feats
+                        );
                         std::process::exit(1);
                     }
 
-                    let max_ver = comp_vers.iter().filter_map(OrdVersion::parse).max().unwrap();
+                    let max_ver = comp_vers
+                        .iter()
+                        .filter_map(OrdVersion::parse)
+                        .max()
+                        .unwrap();
 
                     println!("INFO: provided features contains in {max_ver}");
                     println!();
@@ -532,14 +633,26 @@ impl DepiCommand {
 
                 println!("CHECK SUCCESSFUL!");
             }
-            DepiCommandVariant::Get { name, version_count, full } => {
-                let crates_io_dep = CratesIoDependency::from_crates_api(name).unwrap_or_else(|| {
-                    eprintln!("ERROR: CratesIoDependency::from_creates_api with value {}", &name);
-                    std::process::exit(1);
-                });
+            DepiCommandVariant::Get {
+                name,
+                version_count,
+                full,
+            } => {
+                let crates_io_dep =
+                    CratesIoDependency::from_crates_api(name).unwrap_or_else(|| {
+                        eprintln!(
+                            "ERROR: CratesIoDependency::from_creates_api with value {}",
+                            &name
+                        );
+                        std::process::exit(1);
+                    });
 
                 let mut versions = crates_io_dep.versions.into_iter().collect::<Vec<(_, _)>>();
-                versions.sort_by(|(v1, _), (v2, _)| OrdVersion::parse(v2).unwrap_or_default().cmp(&OrdVersion::parse(v1).unwrap_or_default()));
+                versions.sort_by(|(v1, _), (v2, _)| {
+                    OrdVersion::parse(v2)
+                        .unwrap_or_default()
+                        .cmp(&OrdVersion::parse(v1).unwrap_or_default())
+                });
                 if let Some(take) = version_count {
                     versions.truncate(*take);
                 }
@@ -549,7 +662,14 @@ impl DepiCommand {
                 println!(" * versions: [");
                 for (v, fs) in versions {
                     if *full {
-                        println!("  * {}: [{}]", v, fs.into_iter().filter(|f| !f.starts_with("_")).collect::<Vec<_>>().join(", "));
+                        println!(
+                            "  * {}: [{}]",
+                            v,
+                            fs.into_iter()
+                                .filter(|f| !f.starts_with("_"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        );
                     } else {
                         println!("  * {}: [...{} features]", v, fs.len());
                     }
@@ -557,19 +677,22 @@ impl DepiCommand {
                 println!(" ]")
             }
             DepiCommandVariant::List => {
-                let (deps, dev_deps) = get_dev_and_deps_lines_from_cargo(env::current_dir().unwrap_or(".".into())).unwrap();
+                let (deps, dev_deps) =
+                    get_dev_and_deps_lines_from_cargo(env::current_dir().unwrap_or(".".into()))
+                        .unwrap();
 
-                if let Some(deps) = deps {
+                if !deps.is_empty() {
                     println!("DEPENDENCIES:");
                     for dep in deps {
-                        if let Some(cargo_dep) = CargoDependency::from_cargo(dep.as_str(), "normal") {
+                        if let Some(cargo_dep) = CargoDependency::from_cargo(dep.as_str(), "normal")
+                        {
                             println!("{}", &cargo_dep)
                         }
                     }
                     println!();
                 }
 
-                if let Some(dev_deps) = dev_deps {
+                if !dev_deps.is_empty() {
                     println!("DEV-DEPENDENCIES:");
                     for ddep in dev_deps {
                         if let Some(cargo_dep) = CargoDependency::from_cargo(ddep.as_str(), "dev") {
@@ -584,41 +707,71 @@ impl DepiCommand {
     }
 }
 
-fn get_dev_and_deps_names_from_cargo<P: AsRef<Path>>(path: P) -> Option<(Option<Vec<String>>, Option<Vec<String>>)> {
-    let (deps, dev_deps) = get_dev_and_deps_lines_from_cargo(path)?;
+fn append_dep_to_cargo_file<P: AsRef<Path>>(path: P, cd: CargoDependency) -> Option<()> {
+    let cargo_path = find_cargo_file(path)?;
+    let cargo_content = read_cargo_file_unchecked(&cargo_path)?;
 
-    let mut dep_names = Vec::new();
-    let mut dev_dep_names = Vec::new();
-
-    if let Some(deps) = deps {
-        for dep in deps {
-            let (name, _) = dep.split_once("=").map(|(n, a)| (n.trim(), a))?;
-            dep_names.push(name.to_string());
-        }
-    }
-    if let Some(dev_deps) = dev_deps {
-        for ddep in dev_deps {
-            let (name, _) = ddep.split_once("=").map(|(n, a)| (n.trim(), a))?;
-            dev_dep_names.push(name.to_string());
-        }
-    }
-
-    let dep_names = if dep_names.is_empty() {
-        None
-    } else {
-        Some(dep_names)
-    };
-    let dev_dep_names = if dev_dep_names.is_empty() {
-        None
-    } else {
-        Some(dev_dep_names)
+    let section_name = match cd.type_ {
+        DepType::Normal => "[dependencies]",
+        DepType::Dev => "[dev-dependencies]",
     };
 
-    Some((dep_names, dev_dep_names))
+    let mut inserted = false;
+    let mut in_section = false;
+
+    let mut new_content = Vec::new();
+
+    for line in cargo_content.lines() {
+        let linet = line.trim();
+
+        if linet.starts_with("[") && linet.ends_with("]") {
+            in_section = linet == section_name;
+            new_content.push(line.to_string());
+            continue;
+        }
+
+        if in_section {
+            if let Some((name, _)) = linet.split_once("=") {
+                let name = name.trim();
+
+                if !inserted && *name > *cd.name {
+                    new_content.push(cd.to_cargo_dependency());
+                    inserted = true;
+                }
+            }
+        }
+
+        new_content.push(line.to_string());
+    }
+
+    if !inserted && in_section {
+        new_content.push(cd.to_cargo_dependency());
+        inserted = true;
+    }
+
+    if !inserted {
+        new_content.push(String::new());
+        new_content.push(section_name.to_string());
+        new_content.push(cd.to_cargo_dependency());
+    }
+
+    fs::write(cargo_path, new_content.join("\n")).ok()?;
+
+    Some(())
+}
+fn get_dev_and_deps_lines_from_cargo<P: AsRef<Path>>(
+    path: P,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let path = find_cargo_file(path)?;
+    let content = read_cargo_file_unchecked(path)?;
+
+    get_dev_and_deps_lines_from_cargo_content(content)
 }
 
-fn get_dev_and_deps_lines_from_cargo<P: AsRef<Path>>(path: P) -> Option<(Option<Vec<String>>, Option<Vec<String>>)> {
-    let cargo_content = read_cargo_file(path)?;
+fn get_dev_and_deps_lines_from_cargo_content<S: AsRef<str>>(
+    content: S,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let cargo_content = content.as_ref();
 
     let mut is_dep_block = false;
     let mut is_dev_dep_block = false;
@@ -653,29 +806,26 @@ fn get_dev_and_deps_lines_from_cargo<P: AsRef<Path>>(path: P) -> Option<(Option<
         }
     }
 
-    let deps = if deps.is_empty() {
-        None
-    } else {
-        Some(deps)
-    };
-    let dev_deps = if dev_deps.is_empty() {
-        None
-    } else {
-        Some(dev_deps)
-    };
-
-
     Some((deps, dev_deps))
 }
 
 fn open_cargo_file_rw<P: AsRef<Path>>(path: P) -> Option<fs::File> {
     let cargo_path = find_cargo_file(path)?;
-    fs::File::options().read(true).write(true).create(true).open(cargo_path).ok()
+    fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(cargo_path)
+        .ok()
 }
 
 fn read_cargo_file<P: AsRef<Path>>(path: P) -> Option<String> {
     let cargo_path = find_cargo_file(path)?;
     fs::read_to_string(cargo_path).ok()
+}
+
+fn read_cargo_file_unchecked<P: AsRef<Path>>(path: P) -> Option<String> {
+    fs::read_to_string(path).ok()
 }
 
 fn find_cargo_file<P: AsRef<Path>>(path: P) -> Option<PathBuf> {
