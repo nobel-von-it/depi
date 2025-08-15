@@ -13,15 +13,24 @@ struct OrdVersion(u32, u32, u32);
 
 impl OrdVersion {
     fn parse<S: AsRef<str>>(s: S) -> Option<OrdVersion> {
+        let mut result = OrdVersion::default();
+
         let ss = s.as_ref().split(".").collect::<Vec<_>>();
-        if ss.len() != 3 {
-            return None;
+
+        match ss.len() {
+            1 => result.0 = ss[0].parse().ok()?,
+            2 => {
+                result.0 = ss[0].parse().ok()?;
+                result.1 = ss[1].parse().ok()?;
+            }
+            3 => {
+                result.0 = ss[0].parse().ok()?;
+                result.1 = ss[1].parse().ok()?;
+                result.2 = ss[2].parse().ok()?;
+            }
+            _ => return None,
         }
-        Some(Self(
-            ss[0].parse().ok()?,
-            ss[1].parse().ok()?,
-            ss[2].parse().ok()?,
-        ))
+        Some(result)
     }
 }
 
@@ -581,7 +590,8 @@ impl DepiCommand {
                     });
 
                 if let Some(version) = version {
-                    if !crates_io_dep.versions.contains_key(version) {
+                    let version = OrdVersion::parse(version).unwrap();
+                    if !crates_io_dep.versions.contains_key(&version.to_string()) {
                         eprintln!(
                             "ERROR: in crate {} provided version {} is incorrect",
                             &name, &version
