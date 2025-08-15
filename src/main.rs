@@ -156,36 +156,43 @@ impl CargoDependency {
     ) -> Option<Self> {
         let crates_io_dep = CratesIoDependency::from_crates_api(dep_name)?;
 
-        let cargo_version = if let Some(dep_version_provided) = dep_version {
-            if !crates_io_dep.versions.contains_key(dep_version_provided) {
-                eprintln!("Invalid dependency version provided");
-                return None;
+        let cargo_version = match dep_version {
+            Some(dep_version_provided) => {
+                if !crates_io_dep.versions.contains_key(dep_version_provided) {
+                    eprintln!("Invalid dependency version provided");
+                    return None;
+                }
+                dep_version_provided.to_string()
             }
-            dep_version_provided.to_string()
-        } else {
-            crates_io_dep.get_last_version()
+            None => crates_io_dep.get_last_version(),
         };
 
-        let mut cargo_features = None;
-        if let Some(dep_features_provided) = dep_features {
+        let mut cargo_features = if let Some(dep_features_provided) = dep_features {
             // no way
             let crates_features = crates_io_dep.versions.get(&cargo_version).unwrap();
-            if dep_features_provided
-                .split(",")
-                .map(|f| f.trim())
+
+            let requested_features = dep_features_provided
+                .split(',')
+                .map(str::trim)
+                .collect::<Vec<_>>();
+
+            if requested_features
+                .iter()
                 .all(|f| crates_features.contains(&f.to_string()))
             {
-                cargo_features = Some(
-                    dep_features_provided
-                        .split(",")
-                        .map(|f| f.trim().to_string())
+                Some(
+                    requested_features
+                        .into_iter()
+                        .map(str::to_string)
                         .collect::<Vec<_>>(),
-                );
+                )
             } else {
                 eprintln!("Invalid dependency features provided");
                 return None;
             }
-        }
+        } else {
+            None
+        };
 
         Some(Self {
             name: dep_name.to_string(),
