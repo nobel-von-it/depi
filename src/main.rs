@@ -457,6 +457,10 @@ enum DepiCommandVariant {
         #[clap(long = "trust")]
         trust_me: bool,
     },
+    Remove {
+        #[clap(required = true)]
+        dep_name: String,
+    },
     Check {
         #[clap(required = true)]
         name: String,
@@ -596,61 +600,13 @@ impl DepiCommand {
                 println!("{}", cargo_dependency.to_cargo_dependency());
 
                 append_dep_to_cargo_file(path, cargo_dependency).unwrap();
-
-                // let (dep_names, dev_dep_names) = get_dev_and_deps_names_from_cargo(path).unwrap();
-                // // TODO: rewrite
-                // let mut dep_names = dep_names.unwrap_or_default();
-                // let mut dev_dep_names = dev_dep_names.unwrap_or_default();
-                //
-                // match dep_type {
-                //     DepType::Normal => {
-                //         match dep_names.binary_search(dep_name) {
-                //             Ok(_) => {
-                //                 println!("Provided dependency already in DEPENDENCIES");
-                //                 return;
-                //             }
-                //             Err(idx) => dep_names.insert(idx, dep_name.to_string()),
-                //         }
-                //         println!("{dep_names:#?}");
-                //     }
-                //     DepType::Dev => {
-                //         match dev_dep_names.binary_search(dep_name) {
-                //             Ok(_) => {
-                //                 println!("Provided dependency already in DEV-DEPENDENCIES");
-                //                 return;
-                //             }
-                //             Err(idx) => dev_dep_names.insert(idx, dep_name.to_string()),
-                //         }
-                //         println!("{dev_dep_names:#?}");
-                //     }
-                // }
-
-                // let mut index = 0;
-                // for i in 0..dep_name_list.len() {
-                //     if i == 0 {
-                //         if dep_name < dep_name_list[i] {
-                //             index = 0;
-                //             break;
-                //         }
-                //     } else if dep_name_list[i-1] < dep_name && dep_name_list[i] > dep_name {
-                //         index = i;
-                //         break;
-                //     } else if i == dep_name_list.len()-1 {
-                //         index = dep_name_list.len();
-                //         break;
-                //     }
-                // }
-                //
-                // lines.insert(start_deps + index, format!("{} = blublu", &dep_name));
-                // println!("{start_deps} {index}");
-                // println!("{lines:#?}");
-
-                // let mut cargo_file = open_cargo_file_rw(path.as_deref().unwrap_or(".")).unwrap();
-                // cargo_file.set_len(0).unwrap();
-                // for line in lines {
-                //     cargo_file.write_all(line.as_bytes()).unwrap();
-                //     cargo_file.write_all(b"\n").unwrap();
-                // }
+            }
+            DepiCommandVariant::Remove { dep_name } => {
+                remove_dep_from_cargo_file(
+                    env::current_dir().unwrap_or(".".into()),
+                    dep_name.as_str(),
+                )
+                .unwrap();
             }
             DepiCommandVariant::Check {
                 name,
@@ -795,6 +751,26 @@ impl DepiCommand {
     }
 }
 
+fn remove_dep_from_cargo_file<P: AsRef<Path>>(path: P, dep_name: &str) -> Option<()> {
+    let cargo_path = find_cargo_file(path)?;
+    let cargo_content = read_cargo_file(&cargo_path)?;
+
+    let mut new_content = cargo_content
+        .lines()
+        .filter(|line| !line.contains(dep_name) || line.trim_start().starts_with("#"))
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if cargo_content == new_content {
+        eprintln!("{} not in Cargo.toml", dep_name);
+        return None;
+    }
+
+    fs::write(cargo_path, new_content).ok()?;
+
+    Some(())
+}
 fn append_dep_to_cargo_file<P: AsRef<Path>>(path: P, cd: CargoDependency) -> Option<()> {
     let cargo_path = find_cargo_file(path)?;
     let cargo_content = read_cargo_file(&cargo_path)?;
