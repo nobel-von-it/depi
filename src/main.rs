@@ -106,6 +106,20 @@ mod ord_version_test {
         parse_is_some("~1.2-blubli", 1, 2, 0);
     }
     #[test]
+    fn parse_with_neglect_data_three_test() {
+        parse_is_some("=1.2.3", 1, 2, 3);
+        parse_is_some("^1.2.3", 1, 2, 3);
+        parse_is_some("~1.2.3", 1, 2, 3);
+
+        parse_is_some("1.2.3-rc2", 1, 2, 3);
+        parse_is_some("1.2.3-buld.1", 1, 2, 3);
+        parse_is_some("1.2.3-blubli", 1, 2, 3);
+
+        parse_is_some("=1.2.3-rc2", 1, 2, 3);
+        parse_is_some("^1.2.3-buld.1", 1, 2, 3);
+        parse_is_some("~1.2.3-blubli", 1, 2, 3);
+    }
+    #[test]
     fn parse_with_incorrect_data_test() {
         parse_is_none("slkdjflsdkfj");
         parse_is_none("...-lbub");
@@ -183,13 +197,15 @@ impl CratesIoDependency {
 enum DepType {
     Dev,
     Normal,
+    Target(String),
 }
 
 impl<S: AsRef<str>> From<S> for DepType {
     fn from(s: S) -> Self {
         match s.as_ref() {
             "dev" | "d" => Self::Dev,
-            _ => Self::Normal,
+            "normal" | "n" => Self::Normal,
+            _ => Self::Target(s.as_ref().to_string()),
         }
     }
 }
@@ -755,10 +771,10 @@ fn remove_dep_from_cargo_file<P: AsRef<Path>>(path: P, dep_name: &str) -> Option
     let cargo_path = find_cargo_file(path)?;
     let cargo_content = read_cargo_file(&cargo_path)?;
 
-    let mut new_content = cargo_content
+    let new_content = cargo_content
         .lines()
         .filter(|line| !line.contains(dep_name) || line.trim_start().starts_with("#"))
-        .map(|l| l.to_string())
+        .map(str::to_string)
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -778,6 +794,7 @@ fn append_dep_to_cargo_file<P: AsRef<Path>>(path: P, cd: CargoDependency) -> Opt
     let section_name = match cd.type_ {
         DepType::Normal => "[dependencies]",
         DepType::Dev => "[dev-dependencies]",
+        DepType::Target(ref s) => &format!("[target.'cfg({})'.dependencies]", &s),
     };
 
     let mut inserted = false;
@@ -904,15 +921,20 @@ fn construct_cargo_file(
     sb.push_str(&format!("version = \"{version}\"\n"));
     sb.push_str(&format!("edition = \"{edition}\"\n"));
     sb.push('\n');
-    sb.push_str("[dependencies]\n");
-    for dep in deps {
-        sb.push_str(&dep.to_cargo_dependency());
+    if !deps.is_empty() {
+        sb.push_str("[dependencies]\n");
+        for dep in deps {
+            sb.push_str(&dep.to_cargo_dependency());
+            sb.push('\n');
+        }
         sb.push('\n');
     }
-    sb.push('\n');
-    sb.push_str("[dev-dependencies]\n");
-    for dep in dev_deps {
-        sb.push_str(&dep.to_cargo_dependency());
+    if !dev_deps.is_empty() {
+        sb.push_str("[dev-dependencies]\n");
+        for dep in dev_deps {
+            sb.push_str(&dep.to_cargo_dependency());
+            sb.push('\n');
+        }
     }
     sb
 }
