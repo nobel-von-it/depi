@@ -15,7 +15,21 @@ impl OrdVersion {
     fn parse<S: AsRef<str>>(s: S) -> Option<OrdVersion> {
         let mut result = OrdVersion::default();
 
-        let ss = s.as_ref().split(".").collect::<Vec<_>>();
+        //    ^1.2.3-rc3
+        // ...(1.2.3)...
+
+        let mut ss = s.as_ref();
+
+        if ss.contains("-") {
+            let (left, _) = ss.split_once("-")?;
+            ss = left.trim();
+        }
+        let start = ss.chars().nth(0)?;
+        if !start.is_ascii_digit() {
+            ss = ss.trim_start_matches(start);
+        }
+
+        let ss = ss.split(".").collect::<Vec<_>>();
 
         match ss.len() {
             1 => result.0 = ss[0].parse().ok()?,
@@ -31,6 +45,72 @@ impl OrdVersion {
             _ => return None,
         }
         Some(result)
+    }
+}
+
+#[cfg(test)]
+mod ord_version_test {
+    use crate::OrdVersion;
+
+    fn parse_is_some(s: &str, major: u32, minor: u32, patch: u32) {
+        let ov = OrdVersion::parse(s);
+        assert!(ov.is_some());
+        let ov = ov.unwrap();
+
+        assert_eq!(ov.0, major);
+        assert_eq!(ov.1, minor);
+        assert_eq!(ov.2, patch);
+    }
+    fn parse_is_none(s: &str) {
+        let ov = OrdVersion::parse(s);
+        assert!(ov.is_none());
+    }
+    #[test]
+    fn parse_one_test() {
+        parse_is_some("1", 1, 0, 0);
+    }
+    #[test]
+    fn parse_two_test() {
+        parse_is_some("1.2", 1, 2, 0);
+    }
+    #[test]
+    fn parse_three_test() {
+        parse_is_some("1.2.3", 1, 2, 3);
+    }
+    #[test]
+    fn parse_with_neglect_data_one_test() {
+        parse_is_some("=1", 1, 0, 0);
+        parse_is_some("^1", 1, 0, 0);
+        parse_is_some("~1", 1, 0, 0);
+
+        parse_is_some("1-rc2", 1, 0, 0);
+        parse_is_some("1-buld.1", 1, 0, 0);
+        parse_is_some("1-blubli", 1, 0, 0);
+
+        parse_is_some("=1-rc2", 1, 0, 0);
+        parse_is_some("^1-buld.1", 1, 0, 0);
+        parse_is_some("~1-blubli", 1, 0, 0);
+    }
+    #[test]
+    fn parse_with_neglect_data_two_test() {
+        parse_is_some("=1.2", 1, 2, 0);
+        parse_is_some("^1.2", 1, 2, 0);
+        parse_is_some("~1.2", 1, 2, 0);
+
+        parse_is_some("1.2-rc2", 1, 2, 0);
+        parse_is_some("1.2-buld.1", 1, 2, 0);
+        parse_is_some("1.2-blubli", 1, 2, 0);
+
+        parse_is_some("=1.2-rc2", 1, 2, 0);
+        parse_is_some("^1.2-buld.1", 1, 2, 0);
+        parse_is_some("~1.2-blubli", 1, 2, 0);
+    }
+    #[test]
+    fn parse_with_incorrect_data_test() {
+        parse_is_none("slkdjflsdkfj");
+        parse_is_none("...-lbub");
+        parse_is_none("1.-1.-2");
+        parse_is_none("");
     }
 }
 
