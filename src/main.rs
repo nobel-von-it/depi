@@ -21,7 +21,7 @@ fn main() {
 struct Printer;
 impl Printer {
     fn print_updates(updates: &[(&str, &str, &str)]) {
-        println!("{}", "DEP UP".bold().cyan());
+        println!("{}", "DEPS UP".bold().cyan());
         println!("{}", "=".repeat(40).cyan());
 
         let mnl = updates.iter().map(|(n, _, _)| n.len()).max().unwrap();
@@ -46,8 +46,29 @@ impl Printer {
             format!("updated {} dep(s)", updates.len()).green().bold()
         )
     }
-    fn print_init_deps(deps: &[&str]) {
+    fn print_init_deps(deps: &[(String, String, bool)]) {
         println!("{}", "INIT DEPS IN CARGO".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        let mnl = deps.iter().map(|(n, _, _)| n.len()).max().unwrap();
+        let mvl = deps
+            .iter()
+            .map(|(_, v, _)| v.to_string().len())
+            .max()
+            .unwrap();
+        for (name, version, is_features) in deps {
+            println!(
+                "{:<mnl$} {:<mvl$} {}",
+                name.bold(),
+                version.yellow().bold(),
+                if *is_features {
+                    "with features".dimmed()
+                } else {
+                    "without features".dimmed()
+                }
+            );
+        }
+
         println!("{}", "=".repeat(40).cyan());
     }
 }
@@ -191,11 +212,16 @@ impl Cargo {
         }
 
         let mut depst = Table::new();
+        let mut depsafp = Vec::new();
         for i in 0..fdl {
             let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
+
+            depsafp.push((d.name.clone(), d.version.clone(), d.features.is_some()));
             let (name, attrs) = d.to_toml();
             depst.insert(name, attrs);
         }
+
+        Printer::print_init_deps(&depsafp);
 
         newc.insert("dependencies".to_string(), TValue::Table(depst));
         let newc = toml::to_string(&newc)?;
