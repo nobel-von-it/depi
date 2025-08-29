@@ -303,6 +303,8 @@ impl Cargo {
                 tdeps.insert(name, attrs);
             }
 
+            fs::write(&self.0, toml::to_string(&content)?)?;
+
             Printer::added_many(&adeps);
         }
 
