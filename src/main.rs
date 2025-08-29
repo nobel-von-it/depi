@@ -20,6 +20,50 @@ fn main() {
 
 struct Printer;
 impl Printer {
+    fn added_many(added: &[(String, String, bool)]) {
+        println!("{}", "DEPS ADD".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        let mnl = added.iter().map(|(n, _, _)| n.len()).max().unwrap();
+        let mvl = added
+            .iter()
+            .map(|(_, v, _)| v.to_string().len())
+            .max()
+            .unwrap();
+        for (name, version, is_features) in added {
+            println!(
+                "{:<mnl$} {:<mvl$} {}",
+                name.bold(),
+                version.yellow().bold(),
+                if *is_features {
+                    "with features".dimmed()
+                } else {
+                    "without features".dimmed()
+                }
+            );
+        }
+
+        println!("{}", "=".repeat(40).cyan());
+    }
+    fn not_added<S: AsRef<str>>(name: S) {
+        println!("{}", "DEP ADD".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        println!("{} already in the Cargo file", name.as_ref().bold().red());
+
+        println!("{}", "=".repeat(40).cyan());
+    }
+    fn added<S: AsRef<str>>(name: S) {
+        println!("{}", "DEPS ADD".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        println!(
+            "{} succfully add to the Cargo file",
+            name.as_ref().bold().green()
+        );
+
+        println!("{}", "=".repeat(40).cyan());
+    }
     fn print_updates(updates: &[(&str, &str, &str)]) {
         println!("{}", "DEPS UP".bold().cyan());
         println!("{}", "=".repeat(40).cyan());
@@ -90,13 +134,13 @@ enum DepiCommand {
         verbose: bool,
     },
     Add {
-        #[clap(short = 'D', long, required = true)]
+        #[clap(required = true)]
         deps: String,
         #[clap(short, long)]
         verbose: bool,
     },
     Remove {
-        #[clap(short = 'N', long, required = true)]
+        #[clap(required = true)]
         names: String,
         #[clap(short, long)]
         verbose: bool,
@@ -230,6 +274,81 @@ impl Cargo {
 
         Ok(newc)
     }
+    async fn append_deps<S: AsRef<str>>(&self, deps: S, verbose: bool) -> Result<()> {
+        let content = fs::read_to_string(&self.0)?;
+        let mut content = content.parse::<Table>()?;
+
+        if let Some(TValue::Table(tdeps)) = content.get_mut("dependencies") {
+            let mut pdeps = parse_deps(deps)?;
+            let mut fdeps = Vec::new();
+            for pd in &pdeps {
+                fdeps.push(fetch_crates_dep(&pd.name));
+            }
+
+            let fdl = fdeps.len();
+            let fdeps = (future::join_all(fdeps).await)
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+            if fdl != fdeps.len() {
+                return Err(anyhow!("error with fetching some deps"));
+            }
+
+            let mut adeps = Vec::new();
+            for i in 0..fdl {
+                let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
+                let (name, attrs) = d.to_toml();
+                adeps.push((d.name.clone(), d.version.clone(), d.features.is_some()));
+                tdeps.insert(name, attrs);
+            }
+
+            Printer::added_many(&adeps);
+        }
+
+        Ok(())
+    }
+    // async fn append_dep(&self, dep: &Dep) -> Result<()> {
+    //     let content = fs::read_to_string(&self.0)?;
+    //     let content = content.parse::<Table>()?;
+    //
+    //     let mut newc = Table::new();
+    //     let mut dfutures = Vec::new();
+    //     let mut old_versions = Vec::new();
+    //     for (k, v) in &content {
+    //         match k.as_str() {
+    //             "dependencies" => {
+    //                 if let TValue::Table(deps) = v {
+    //                     let (name, attrs) = dep.to_toml();
+    //                     if let Some(d) = deps.insert(name, attrs) {
+    //                         Printer::not_added(&dep.name);
+    //                     } else {
+    //                         Printer::added(&dep.name);
+    //                     }
+    //                     // for (dk, dv) in deps {
+    //                     //     let d = Dep::from_toml(dk, dv.clone())?;
+    //                     //     old_versions.push(d.version.clone());
+    //                     //     dfutures.push(d.update_version());
+    //                     // }
+    //                 }
+    //             }
+    //             k => {
+    //                 newc.insert(
+    //                     k.to_string(),
+    //                     content.get(k).ok_or(anyhow!("invalid cargo"))?.clone(),
+    //                 );
+    //             }
+    //         }
+    //     }
+    //
+    //     let dfl = dfutures.len();
+    //     let udeps = (future::join_all(dfutures).await)
+    //         .into_iter()
+    //         .flatten()
+    //         .collect::<Vec<_>>();
+    //
+    //     Ok(())
+    // }
 
     fn from_cur() -> Result<Self> {
         let cf = Self::find_cargo_file(Path::new("."))?;
@@ -632,17 +751,17 @@ async fn main() -> Result<()> {
         }
         DepiCommand::Init { deps, verbose } => {
             // let cp = Cargo::from_cur()?;
-            let cargo_string = Cargo::init_project(deps, verbose).await?;
+            let cs = Cargo::init_project(deps, verbose).await?;
 
             let mut f = fs::File::create("Cargo.toml")?;
-            f.write_all(cargo_string.as_bytes())?;
+            f.write_all(cs.as_bytes())?;
 
             fs::create_dir("src")?;
             let mut f = fs::File::create("src/main.rs")?;
             f.write_all(MAIN.as_bytes())?;
 
             let gout = process::Command::new("git").arg("init").output()?.stdout;
-            println!("{}", String::from_utf8(gout)?);
+            println!("{}", String::from_utf8(gout)?.bold());
         }
         DepiCommand::New {
             name,
@@ -667,7 +786,11 @@ async fn main() -> Result<()> {
                 .arg("init")
                 .output()?
                 .stdout;
-            println!("{}", String::from_utf8(gout)?);
+            println!("{}", String::from_utf8(gout)?.bold());
+        }
+        DepiCommand::Add { deps, verbose } => {
+            let cp = Cargo::from_cur()?;
+            cp.append_deps(deps, verbose).await?;
         }
         _ => {}
     }
