@@ -76,25 +76,27 @@ impl Printer {
 #[derive(Debug, Parser)]
 enum DepiCommand {
     Init {
-        #[clap(required = true)]
+        #[clap(short = 'D', long, required = true)]
         deps: String,
         #[clap(short, long)]
         verbose: bool,
     },
     New {
         #[clap(required = true)]
+        name: String,
+        #[clap(short = 'D', long, required = true)]
         deps: String,
         #[clap(short, long)]
         verbose: bool,
     },
     Add {
-        #[clap(required = true)]
+        #[clap(short = 'D', long, required = true)]
         deps: String,
         #[clap(short, long)]
         verbose: bool,
     },
     Remove {
-        #[clap(required = true)]
+        #[clap(short = 'N', long, required = true)]
         names: String,
         #[clap(short, long)]
         verbose: bool,
@@ -640,6 +642,31 @@ async fn main() -> Result<()> {
             f.write_all(MAIN.as_bytes())?;
 
             let gout = process::Command::new("git").arg("init").output()?.stdout;
+            println!("{}", String::from_utf8(gout)?);
+        }
+        DepiCommand::New {
+            name,
+            deps,
+            verbose,
+        } => {
+            let cs = Cargo::init_project(deps, verbose).await?;
+
+            let name = PathBuf::from(name);
+            fs::create_dir(&name)?;
+
+            let mut f = fs::File::create(&name.join("Cargo.toml"))?;
+            f.write_all(cs.as_bytes())?;
+
+            let src = name.join("src");
+            fs::create_dir(&src)?;
+            let mut f = fs::File::create(&src.join("main.rs"))?;
+            f.write_all(MAIN.as_bytes())?;
+
+            let gout = process::Command::new("git")
+                .current_dir(name)
+                .arg("init")
+                .output()?
+                .stdout;
             println!("{}", String::from_utf8(gout)?);
         }
         _ => {}
