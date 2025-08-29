@@ -1,13 +1,225 @@
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
+use colored::*;
 use futures::future;
-use serde_json::{Value, from_str};
+use serde_json::{Value as JValue, from_str};
+use toml::{Table, Value as TValue, value::Array};
+
 use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process;
+
+const MAIN: &str = r#"
+fn main() {
+    println!("Hello Depi!");
+}
+"#;
+
+struct Printer;
+impl Printer {
+    fn print_updates(updates: &[(&str, &str, &str)]) {
+        println!("{}", "DEP UP".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        let mnl = updates.iter().map(|(n, _, _)| n.len()).max().unwrap();
+        let mfl = updates
+            .iter()
+            .map(|(_, f, _)| f.to_string().len())
+            .max()
+            .unwrap();
+        for (name, from, to) in updates {
+            println!(
+                "  {:<mnl$} {:<mfl$} -> {}",
+                name.bold(),
+                from.dimmed(),
+                to.yellow().bold()
+            );
+        }
+
+        println!("{}", "=".repeat(40).cyan());
+
+        println!(
+            "{}",
+            format!("updated {} dep(s)", updates.len()).green().bold()
+        )
+    }
+    fn print_init_deps(deps: &[&str]) {
+        println!("{}", "INIT DEPS IN CARGO".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+    }
+}
 
 #[derive(Debug, Parser)]
-struct DepiCommand {
-    #[clap(required = true)]
-    deps: String,
+enum DepiCommand {
+    Init {
+        #[clap(required = true)]
+        deps: String,
+        #[clap(short, long)]
+        verbose: bool,
+    },
+    New {
+        #[clap(required = true)]
+        deps: String,
+        #[clap(short, long)]
+        verbose: bool,
+    },
+    Add {
+        #[clap(required = true)]
+        deps: String,
+        #[clap(short, long)]
+        verbose: bool,
+    },
+    Remove {
+        #[clap(required = true)]
+        names: String,
+        #[clap(short, long)]
+        verbose: bool,
+    },
+    List {
+        #[clap(short, long)]
+        verbose: bool,
+    },
+    Update {
+        #[clap(short, long)]
+        verbose: bool,
+    },
+}
+
+struct Cargo(PathBuf);
+
+impl Cargo {
+    async fn update_deps(&self, verbose: bool) -> Result<()> {
+        let content = fs::read_to_string(&self.0)?;
+        if verbose {
+            println!("INFO: start updating {} file", self.0.display())
+        }
+        let content = content.parse::<Table>()?;
+
+        let mut newc = Table::new();
+        let mut dfutures = Vec::new();
+        let mut old_versions = Vec::new();
+        for (k, v) in &content {
+            match k.as_str() {
+                "dependencies" => {
+                    if let TValue::Table(deps) = v {
+                        for (dk, dv) in deps {
+                            let d = Dep::from_toml(dk, dv.clone())?;
+                            old_versions.push(d.version.clone());
+                            dfutures.push(d.update_version());
+                        }
+                    }
+                }
+                k => {
+                    newc.insert(
+                        k.to_string(),
+                        content.get(k).ok_or(anyhow!("invalid cargo"))?.clone(),
+                    );
+                }
+            }
+        }
+
+        let dfl = dfutures.len();
+        let udeps = (future::join_all(dfutures).await)
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        if dfl != udeps.len() {
+            return Err(anyhow!("error with updating some deps"));
+        }
+
+        let mut updates = Vec::new();
+        let mut deps = Table::new();
+        for i in 0..dfl {
+            if &old_versions[i] < &udeps[i].version {
+                updates.push((
+                    udeps[i].name.as_str(),
+                    old_versions[i].as_str(),
+                    udeps[i].version.as_str(),
+                ));
+            }
+            let (name, attrs) = udeps[i].to_toml();
+            deps.insert(name, attrs);
+        }
+
+        if updates.len() == 0 {
+            println!("no need to be updated");
+            return Ok(());
+        }
+
+        Printer::print_updates(&updates);
+
+        newc.insert("dependencies".to_string(), TValue::Table(deps));
+
+        fs::write(&self.0, toml::to_string(&newc)?)?;
+
+        Ok(())
+    }
+    async fn init_project<S: AsRef<str>>(deps: S, verbose: bool) -> Result<String> {
+        let mut newc = Table::new();
+
+        let mut project = Table::new();
+        let project_name = fs::canonicalize(env::current_dir().unwrap_or(".".into()))?
+            .file_name()
+            .ok_or(anyhow!("failed file_name()"))?
+            .to_str()
+            .ok_or(anyhow!("failed to_str()"))?
+            .to_string();
+        project.insert("name".to_string(), TValue::String(project_name));
+        project.insert("version".to_string(), TValue::String("0.1.0".to_string()));
+        project.insert("edition".to_string(), TValue::String("2024".to_string()));
+
+        newc.insert("project".to_string(), TValue::Table(project));
+
+        let pdeps = parse_deps(deps)?;
+        let mut fdeps = Vec::new();
+        for pd in &pdeps {
+            fdeps.push(fetch_crates_dep(&pd.name));
+        }
+
+        let fdl = fdeps.len();
+        let fdeps = (future::join_all(fdeps).await)
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+
+        if fdl != fdeps.len() {
+            return Err(anyhow!("error with fetching some deps"));
+        }
+
+        let mut depst = Table::new();
+        for i in 0..fdl {
+            let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
+            let (name, attrs) = d.to_toml();
+            depst.insert(name, attrs);
+        }
+
+        newc.insert("dependencies".to_string(), TValue::Table(depst));
+        let newc = toml::to_string(&newc)?;
+
+        Ok(newc)
+    }
+
+    fn from_cur() -> Result<Self> {
+        let cf = Self::find_cargo_file(Path::new("."))?;
+        Ok(Self(cf))
+    }
+    fn find_cargo_file<P: AsRef<Path>>(path: P) -> Result<PathBuf> {
+        let path = path.as_ref();
+        let files = fs::read_dir(path)?;
+        for file in files.into_iter().flatten() {
+            if file.path().display().to_string().contains("Cargo.toml") {
+                return Ok(file.path());
+            }
+        }
+        if let Some(parent) = path.parent() {
+            return Self::find_cargo_file(parent);
+        }
+        Err(anyhow!("cargo not found"))
+    }
 }
 
 #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Debug, Default)]
@@ -86,19 +298,19 @@ async fn fetch_crates_dep<S: AsRef<str>>(name: S) -> Result<CratesDep> {
         .text()
         .await?;
 
-    let obj = from_str::<Value>(&body)?;
+    let obj = from_str::<JValue>(&body)?;
 
-    if let Value::Object(obj) = obj {
-        if let Some(Value::Array(arr)) = obj.get("versions") {
+    if let JValue::Object(obj) = obj {
+        if let Some(JValue::Array(arr)) = obj.get("versions") {
             for v in arr {
-                if let Value::Object(vo) = v {
-                    let num = if let Some(Value::String(num)) = vo.get("num") {
+                if let JValue::Object(vo) = v {
+                    let num = if let Some(JValue::String(num)) = vo.get("num") {
                         num.to_string()
                     } else {
                         continue;
                     };
                     let mut features = Vec::new();
-                    if let Some(Value::Object(fo)) = vo.get("features") {
+                    if let Some(JValue::Object(fo)) = vo.get("features") {
                         for (f, _) in fo {
                             features.push(f.to_string())
                         }
@@ -126,6 +338,9 @@ struct PDep {
     target: String,
 }
 
+fn parse_deps<S: AsRef<str>>(s: S) -> Result<Vec<PDep>> {
+    s.as_ref().trim().split("/").map(|d| parse_dep(d)).collect()
+}
 fn parse_dep<S: AsRef<str>>(s: S) -> Result<PDep> {
     enum DPState {
         Name,
@@ -255,7 +470,6 @@ struct Dep {
     name: String,
     version: String,
     features: Option<Vec<String>>,
-    target: DTarget,
 }
 
 impl Dep {
@@ -272,6 +486,70 @@ impl Dep {
             ),
             None => format!("{} = \"{}\"", &self.name, &self.version),
         }
+    }
+    fn from_toml<S: AsRef<str>>(name: S, attrs: TValue) -> Result<Self> {
+        let name = name.as_ref();
+        match attrs {
+            TValue::String(version) => Ok(Self {
+                name: name.to_string(),
+                version: version.to_string(),
+                features: None,
+            }),
+            TValue::Table(body) => {
+                let version = if let Some(TValue::String(version)) = body.get("version") {
+                    version.to_string()
+                } else {
+                    return Err(anyhow!("parse error: version"));
+                };
+
+                let mut fs = Vec::new();
+                if let Some(TValue::Array(afs)) = body.get("features") {
+                    for f in afs {
+                        if let TValue::String(f) = f {
+                            fs.push(f.to_string())
+                        }
+                    }
+                } else {
+                    return Err(anyhow!("parse error: features"));
+                }
+
+                Ok(Self {
+                    name: name.to_string(),
+                    version,
+                    features: Some(fs),
+                })
+            }
+            _ => Err(anyhow!("parse error: incorrect attrs type")),
+        }
+    }
+    fn to_toml(&self) -> (String, TValue) {
+        if let Some(fs) = &self.features {
+            let mut body = Table::new();
+
+            let mut afs = Array::new();
+            for f in fs {
+                afs.push(TValue::String(f.to_string()))
+            }
+
+            body.insert(
+                "version".to_string(),
+                TValue::String(self.version.to_string()),
+            );
+            body.insert("features".to_string(), TValue::Array(afs));
+
+            (self.name.to_string(), TValue::Table(body))
+        } else {
+            (
+                self.name.to_string(),
+                TValue::String(self.version.to_string()),
+            )
+        }
+    }
+    async fn update_version(self) -> Result<Self> {
+        let fd = fetch_crates_dep(&self.name).await?;
+        let mut d = self;
+        d.version = fd.get_last_version();
+        Ok(d)
     }
 }
 
@@ -308,47 +586,38 @@ fn get_normal_dep(pdep: &PDep, fdep: &CratesDep) -> Result<Dep> {
     } else {
         return Err(anyhow!("invalid features, strange"));
     };
-    let target = if pdep.target.is_empty() {
-        DTarget::Normal
-    } else {
-        DTarget::from(&pdep.target)
-    };
 
     Ok(Dep {
         name,
         version,
         features,
-        target,
     })
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     let com = DepiCommand::parse();
-    let deps = com
-        .deps
-        .split('/')
-        .filter_map(|d| parse_dep(d).map_err(|e| println!("{e:#?}")).ok())
-        .collect::<Vec<_>>();
-
-    let futures = deps
-        .iter()
-        .map(|d| fetch_crates_dep(&d.name))
-        .collect::<Vec<_>>();
-
-    let ress = (future::join_all(futures).await)
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-
-    if deps.len() != ress.len() {
-        eprintln!("bruh length {} != {}", deps.len(), ress.len());
-        return;
-    }
-
-    for i in 0..deps.len() {
-        if let Ok(dep) = get_normal_dep(&deps[i], &ress[i]) {
-            println!("{}", dep.to_cargo_str());
+    match com {
+        DepiCommand::Update { verbose } => {
+            let cp = Cargo::from_cur()?;
+            cp.update_deps(verbose).await?;
         }
+        DepiCommand::Init { deps, verbose } => {
+            // let cp = Cargo::from_cur()?;
+            let cargo_string = Cargo::init_project(deps, verbose).await?;
+
+            let mut f = fs::File::create("Cargo.toml")?;
+            f.write_all(cargo_string.as_bytes())?;
+
+            fs::create_dir("src")?;
+            let mut f = fs::File::create("src/main.rs")?;
+            f.write_all(MAIN.as_bytes())?;
+
+            let gout = process::Command::new("git").arg("init").output()?.stdout;
+            println!("{}", String::from_utf8(gout)?);
+        }
+        _ => {}
     }
+
+    Ok(())
 }
