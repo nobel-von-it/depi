@@ -20,6 +20,55 @@ fn main() {
 
 struct Printer;
 impl Printer {
+    fn list_deps(deps: &[(String, String, Option<Vec<String>>)]) {
+        println!("{}", "DEPS TO REMOVE".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        let mnl = deps.iter().map(|(n, _, _)| n.len()).max().unwrap();
+        let mvl = deps.iter().map(|(_, v, _)| v.len()).max().unwrap();
+
+        for (name, version, features) in deps {
+            if let Some(fs) = features {
+                let fs = fs.join(", ");
+                println!(
+                    "{:<mnl$} @ {:<mvl$} : {}",
+                    name.bold().green(),
+                    version.yellow(),
+                    fs.red()
+                );
+            } else {
+                println!("{:<mnl$} @ {:<mvl$}", name.bold().green(), version.yellow())
+            }
+        }
+
+        println!("{}", "=".repeat(40).cyan());
+    }
+    fn remove_deps(removed: &[&str], remained: &[&str], all_removed: bool) {
+        println!("{}", "DEPS TO REMOVE".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        // let mut mnl = (removed.iter().map(|d| d.len()).max().unwrap())
+        //     .max(remained.iter().map(|d| d.len()).max().unwrap());
+
+        for name in removed {
+            println!("{}", name.red());
+        }
+
+        println!("{}", "DEPS TO REMAIN".bold().cyan());
+        println!("{}", "=".repeat(40).cyan());
+
+        for name in remained {
+            println!("{}", name.bold().green())
+        }
+
+        println!("{}", "=".repeat(40).cyan());
+
+        if all_removed {
+            println!("{}", "all deps removed successfully".green());
+        } else {
+            println!("{}", "something went wrong (ignore or error)".red());
+        }
+    }
     fn added_many(added: &[(String, String, bool)]) {
         println!("{}", "DEPS ADD".bold().cyan());
         println!("{}", "=".repeat(40).cyan());
@@ -118,38 +167,68 @@ impl Printer {
 }
 
 #[derive(Debug, Parser)]
+#[clap(about = "DEPendency Initialization manager", version)]
 enum DepiCommand {
+    /// Initialize a new project in current directory with provided dependencies
     Init {
+        /// Dependencies string in format: <name>@<version>:<features>!<target>
+        /// Multiple dependencies separated by '/'
+        /// Example: serde@1.0:derive,json/anyhow@1.0!dev
         #[clap(short = 'D', long, required = true)]
         deps: String,
+
+        /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
     },
+    /// Create a new project in provided directory with provided dependencies
     New {
+        /// Project and directory name
         #[clap(required = true)]
         name: String,
+
+        /// Dependencies string in format: <name>@<version>:<features>!<target>
+        /// Multiple dependencies separated by '/'
+        /// Example: serde@1.0:derive,json/anyhow@1.0!dev
         #[clap(short = 'D', long, required = true)]
         deps: String,
+
+        /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
     },
+    /// Add new dependencies to existing project
     Add {
+        /// Dependencies string in format: <name>@<version>:<features>!<target>
+        /// Multiple dependencies separated by '/'
+        /// Example: serde@1.0:derive,json/anyhow@1.0!dev
         #[clap(required = true)]
         deps: String,
+
+        /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
     },
+    /// Remove dependencies from existing project
     Remove {
+        /// Dependency names to remove, separated by commas
+        /// Example: serde,anyhow,tokio
         #[clap(required = true)]
         names: String,
+
+        /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
     },
+    /// List all current dependencies
     List {
+        /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
     },
+    /// Update dependencies to latest versions
     Update {
+        /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
     },
@@ -310,47 +389,44 @@ impl Cargo {
 
         Ok(())
     }
-    // async fn append_dep(&self, dep: &Dep) -> Result<()> {
-    //     let content = fs::read_to_string(&self.0)?;
-    //     let content = content.parse::<Table>()?;
-    //
-    //     let mut newc = Table::new();
-    //     let mut dfutures = Vec::new();
-    //     let mut old_versions = Vec::new();
-    //     for (k, v) in &content {
-    //         match k.as_str() {
-    //             "dependencies" => {
-    //                 if let TValue::Table(deps) = v {
-    //                     let (name, attrs) = dep.to_toml();
-    //                     if let Some(d) = deps.insert(name, attrs) {
-    //                         Printer::not_added(&dep.name);
-    //                     } else {
-    //                         Printer::added(&dep.name);
-    //                     }
-    //                     // for (dk, dv) in deps {
-    //                     //     let d = Dep::from_toml(dk, dv.clone())?;
-    //                     //     old_versions.push(d.version.clone());
-    //                     //     dfutures.push(d.update_version());
-    //                     // }
-    //                 }
-    //             }
-    //             k => {
-    //                 newc.insert(
-    //                     k.to_string(),
-    //                     content.get(k).ok_or(anyhow!("invalid cargo"))?.clone(),
-    //                 );
-    //             }
-    //         }
-    //     }
-    //
-    //     let dfl = dfutures.len();
-    //     let udeps = (future::join_all(dfutures).await)
-    //         .into_iter()
-    //         .flatten()
-    //         .collect::<Vec<_>>();
-    //
-    //     Ok(())
-    // }
+    async fn remove_deps<S: AsRef<str>>(&self, names: S, verbose: bool) -> Result<()> {
+        let mut content = fs::read_to_string(&self.0)?.parse::<Table>()?;
+
+        let names = names.as_ref().trim().split(",").collect::<Vec<_>>();
+        if let Some(TValue::Table(deps)) = content.get_mut("dependencies") {
+            let needs_remove = names.len();
+
+            let before_remove = deps.len();
+            deps.retain(|k, v| !names.contains(&k));
+            let after_remove = deps.len();
+
+            let cur_deps = deps.iter().map(|(dk, _)| dk.as_str()).collect::<Vec<_>>();
+
+            Printer::remove_deps(
+                &names,
+                &cur_deps,
+                needs_remove == (before_remove - after_remove),
+            );
+            // println!("{:#?}", &deps);
+
+            fs::write(&self.0, toml::to_string(&content)?)?;
+        }
+
+        Ok(())
+    }
+    async fn list(&self, verbose: bool) -> Result<()> {
+        let content = fs::read_to_string(&self.0)?.parse::<Table>()?;
+        if let Some(TValue::Table(deps)) = content.get("dependencies") {
+            let mut pri_deps = Vec::new();
+            for (dk, dv) in deps {
+                let d = Dep::from_toml(dk, dv.clone())?;
+                pri_deps.push((d.name, d.version, d.features))
+            }
+
+            Printer::list_deps(&pri_deps);
+        }
+        Ok(())
+    }
 
     fn from_cur() -> Result<Self> {
         let cf = Self::find_cargo_file(Path::new("."))?;
@@ -747,10 +823,6 @@ fn get_normal_dep(pdep: &PDep, fdep: &CratesDep) -> Result<Dep> {
 async fn main() -> Result<()> {
     let com = DepiCommand::parse();
     match com {
-        DepiCommand::Update { verbose } => {
-            let cp = Cargo::from_cur()?;
-            cp.update_deps(verbose).await?;
-        }
         DepiCommand::Init { deps, verbose } => {
             // let cp = Cargo::from_cur()?;
             let cs = Cargo::init_project(deps, verbose).await?;
@@ -794,7 +866,18 @@ async fn main() -> Result<()> {
             let cp = Cargo::from_cur()?;
             cp.append_deps(deps, verbose).await?;
         }
-        _ => {}
+        DepiCommand::Remove { names, verbose } => {
+            let cp = Cargo::from_cur()?;
+            cp.remove_deps(names, verbose).await?;
+        }
+        DepiCommand::Update { verbose } => {
+            let cp = Cargo::from_cur()?;
+            cp.update_deps(verbose).await?;
+        }
+        DepiCommand::List { verbose } => {
+            let cp = Cargo::from_cur()?;
+            cp.list(verbose).await?;
+        }
     }
 
     Ok(())

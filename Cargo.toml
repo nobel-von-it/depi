@@ -2,6 +2,13 @@
 name = "depi"
 version = "0.1.0"
 edition = "2024"
+authors = ["Nobel von IT"]
+description = "DEPendency Initialization manager"
+repository = "https://github.com/nobel-von-it/depi.git"
+license = "MIT"
+keywords = ["manager", "dependencies", "projects"]
+categories = ["command-line-utilities", "config"]
+
 
 [dependencies]
 anyhow = "1.0.99"
