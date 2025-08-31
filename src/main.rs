@@ -20,28 +20,39 @@ fn main() {
 
 struct Printer;
 impl Printer {
-    fn list_deps(deps: &[(String, String, Option<Vec<String>>)]) {
-        println!("{}", "DEPS TO REMOVE".bold().cyan());
+    fn list_deps(deps: &HashMap<DType, Vec<Dep>>) {
+        println!("{}", "DEPS LS".bold().cyan());
         println!("{}", "=".repeat(40).cyan());
 
-        let mnl = deps.iter().map(|(n, _, _)| n.len()).max().unwrap();
-        let mvl = deps.iter().map(|(_, v, _)| v.len()).max().unwrap();
+        let mut mnl = 0;
+        let mut mvl = 0;
 
-        for (name, version, features) in deps {
-            if let Some(fs) = features {
-                let fs = fs.join(", ");
-                println!(
-                    "{:<mnl$} @ {:<mvl$} : {}",
-                    name.bold().green(),
-                    version.yellow(),
-                    fs.red()
-                );
-            } else {
-                println!("{:<mnl$} @ {:<mvl$}", name.bold().green(), version.yellow())
-            }
+        for (_, ds) in deps {
+            mnl = mnl.max(ds.iter().map(|d| d.name.len()).max().unwrap());
+            mvl = mnl.max(ds.iter().map(|d| d.version.len()).max().unwrap());
         }
 
-        println!("{}", "=".repeat(40).cyan());
+        for (t, ds) in deps {
+            println!("{}", t.to_string().to_uppercase().bold());
+            for d in ds {
+                if let Some(fs) = &d.features {
+                    let fs = fs.join(", ");
+                    println!(
+                        "  - {:<mnl$} @ {:<mvl$} : {}",
+                        d.name.bold().green(),
+                        d.version.yellow(),
+                        fs.red()
+                    )
+                } else {
+                    println!(
+                        "  - {:<mnl$} @ {:<mvl$}",
+                        d.name.bold().green(),
+                        d.version.yellow()
+                    )
+                }
+            }
+            println!("{}", "=".repeat(40).cyan());
+        }
     }
     fn remove_deps(removed: &[&str], remained: &[&str], all_removed: bool) {
         println!("{}", "DEPS TO REMOVE".bold().cyan());
@@ -163,6 +174,26 @@ impl Printer {
         }
 
         println!("{}", "=".repeat(40).cyan());
+    }
+}
+
+#[derive(Hash, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum DType {
+    Normal,
+    Dev,
+    Build,
+    OS(String),
+}
+
+impl ToString for DType {
+    fn to_string(&self) -> String {
+        (match self {
+            DType::Normal => "normal",
+            DType::Dev => "dev",
+            DType::Build => "build",
+            DType::OS(os) => os,
+        })
+        .to_string()
     }
 }
 
@@ -414,20 +445,38 @@ impl Cargo {
 
         Ok(())
     }
+    async fn _get_deps_from_value(t: &Table) -> Vec<Dep> {
+        t.iter()
+            .map(|(dk, dv)| Dep::from_toml(dk, dv.clone()))
+            .flatten()
+            .collect()
+    }
     async fn list(&self, verbose: bool) -> Result<()> {
         let content = fs::read_to_string(&self.0)?.parse::<Table>()?;
-        if let Some(TValue::Table(deps)) = content.get("dependencies") {
-            let mut pri_deps = Vec::new();
-            for (dk, dv) in deps {
-                let d = Dep::from_toml(dk, dv.clone())?;
-                pri_deps.push((d.name, d.version, d.features))
+        let mut deps_by_type: HashMap<DType, Vec<Dep>> = HashMap::new();
+        for (k, v) in content {
+            match k.as_str() {
+                "dependencies" => {
+                    if let TValue::Table(v) = v {
+                        deps_by_type.insert(DType::Normal, Self::_get_deps_from_value(&v).await);
+                    }
+                }
+                "dev-dependencies" => {
+                    if let TValue::Table(v) = v {
+                        deps_by_type.insert(DType::Dev, Self::_get_deps_from_value(&v).await);
+                    }
+                }
+                "build-dependencies" => {
+                    if let TValue::Table(v) = v {
+                        deps_by_type.insert(DType::Build, Self::_get_deps_from_value(&v).await);
+                    }
+                }
+                _ => {}
             }
-
-            Printer::list_deps(&pri_deps);
         }
+        Printer::list_deps(&deps_by_type);
         Ok(())
     }
-
     fn from_cur() -> Result<Self> {
         let cf = Self::find_cargo_file(Path::new("."))?;
         Ok(Self(cf))
