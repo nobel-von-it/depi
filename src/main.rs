@@ -1,7 +1,7 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Error, Result, anyhow};
 use clap::{Parser, Subcommand};
 use colored::*;
-use futures::future;
+use futures::{Future, future};
 use serde_json::{Value as JValue, from_str};
 use toml::{Table, Value as TValue, value::Array};
 
@@ -52,6 +52,7 @@ impl Printer {
                 }
             }
             println!("{}", "=".repeat(40).cyan());
+            println!()
         }
     }
     fn remove_deps(removed: &[&str], remained: &[&str], all_removed: bool) {
@@ -185,6 +186,17 @@ enum DType {
     OS(String),
 }
 
+impl DType {
+    fn to_cargo_field(&self) -> String {
+        match self {
+            DType::Normal => "dependencies".to_string(),
+            DType::Dev => "dev-dependencies".to_string(),
+            DType::Build => "build-dependencies".to_string(),
+            DType::OS(os) => format!("target.'cfg({})'.dependencies", os),
+        }
+    }
+}
+
 impl ToString for DType {
     fn to_string(&self) -> String {
         (match self {
@@ -265,73 +277,275 @@ enum DepiCommand {
     },
 }
 
+fn _start_update_futures_from_toml_table(
+    deps: &Table,
+) -> Result<(Vec<String>, Vec<impl Future<Output = Result<Dep, Error>>>)> {
+    let mut oldvs = Vec::new();
+    let mut ress = Vec::new();
+    for (dk, dv) in deps {
+        let d = Dep::from_toml(dk, dv.clone())?;
+        oldvs.push(d.version.clone());
+        ress.push(d.update_version());
+    }
+
+    Ok((oldvs, ress))
+}
+
+// struct FUpd {
+//     dtype: DType,
+//     fdeps: Vec<impl Future<Output = Result<Dep, Error>>>,
+//     ovs: Vec<String>,
+// }
+//
+// impl FUpd {
+//     fn new(dtype: DType, deps: &Table) -> Result<Self> {
+//         let fdeps = Vec::new();
+//         let ovs = Vec::new();
+//         for (k, v) in deps {
+//             let d = Dep::from_toml(k, v.clone())?;
+//             ovs.push(d.version.clone());
+//             fdeps.push(d.update_version());
+//         }
+//
+//         Ok(Self { dtype, fdeps, ovs })
+//     }
+// }
+//
+// struct Updatetus {
+//     dtype: DType,
+//     udeps: Vec<Dep>,
+//     ovs: Vec<String>,
+// }
+//
+// impl Upd {
+//     async fn wait(fupd: FUpd) -> Result<Self> {
+//         let ffl = fupd.fdeps.len();
+//         let udeps = (future::join_all(fupd.fdeps).await)
+//             .into_iter()
+//             .flatten()
+//             .collect::<Vec<_>>();
+//         if ffl != udeps.len() {
+//             return Err(anyhow!(
+//                 "ERROR: with updating some deps {}",
+//                 fupd.dtype.to_string()
+//             ));
+//         }
+//
+//         Ok(Self {
+//             dtype: fupd.dtype,
+//             udeps,
+//             ovs: fupd.ovs,
+//         })
+//     }
+// }
+
+async fn _update_deps_by_table_and_type(
+    deps: &Table,
+    dtype: DType,
+    verbose: bool,
+) -> Result<(DType, Option<Table>)> {
+    if deps.is_empty() {
+        return Ok((dtype.clone(), None));
+    }
+
+    let mut ovs = Vec::new();
+    let mut fdeps = Vec::new();
+    for (k, v) in deps {
+        let d = Dep::from_toml(k, v.clone())?;
+        ovs.push(d.version.clone());
+        fdeps.push(d.update_version());
+    }
+
+    let fdl = fdeps.len();
+    let udeps = (future::join_all(fdeps).await)
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    if fdl != udeps.len() {
+        return Err(anyhow!(
+            "ERROR: with updating some deps {}",
+            dtype.to_string()
+        ));
+    }
+
+    let mnl = udeps.iter().map(|d| d.name.len()).max().unwrap();
+    let mvl = ovs.iter().map(|v| v.len()).max().unwrap();
+
+    let mut rest = Table::new();
+    let mut latest = 0;
+    for i in 0..fdl {
+        if ovs[i] < udeps[i].version {
+            println!(
+                "{} {} -> {}",
+                &udeps[i].name.bold().green(),
+                &ovs[i].dimmed(),
+                &udeps[i].version.bold().yellow()
+            );
+        } else {
+            latest += 1;
+        }
+
+        let (name, attrs) = udeps[i].to_toml();
+        rest.insert(name, attrs);
+    }
+
+    if fdl == latest {
+        println!(
+            "all deps in {} are {}",
+            dtype.to_cargo_field().bold(),
+            "latest".bold().green()
+        );
+    } else {
+        println!(
+            "{} dep(s) in {} are latest",
+            latest.to_string().bold().green(),
+            dtype.to_cargo_field().bold()
+        );
+    }
+
+    println!("{}", "=".repeat(40).cyan());
+
+    Ok((dtype.clone(), Some(rest)))
+}
+
 struct Cargo(PathBuf);
 
 impl Cargo {
+    async fn update_dep_type(
+        content: &Table,
+        verbose: bool,
+        dtype: DType,
+    ) -> Result<(DType, Option<Table>)> {
+        if let Some(TValue::Table(deps)) = content.get(&dtype.to_cargo_field()) {
+            return Ok(_update_deps_by_table_and_type(&deps, dtype, verbose).await?);
+        }
+        Ok((dtype.clone(), None))
+    }
     async fn update_deps(&self, verbose: bool) -> Result<()> {
+        println!("{}", "DEPS UP".bold().on_cyan());
+        println!("{}", "=".repeat(40).cyan());
+
         let content = fs::read_to_string(&self.0)?;
         if verbose {
             println!("INFO: start updating {} file", self.0.display())
         }
-        let content = content.parse::<Table>()?;
+        let mut content = content.parse::<Table>()?;
 
-        let mut newc = Table::new();
-        let mut dfutures = Vec::new();
-        let mut old_versions = Vec::new();
-        for (k, v) in &content {
-            match k.as_str() {
-                "dependencies" => {
-                    if let TValue::Table(deps) = v {
-                        for (dk, dv) in deps {
-                            let d = Dep::from_toml(dk, dv.clone())?;
-                            old_versions.push(d.version.clone());
-                            dfutures.push(d.update_version());
-                        }
-                    }
-                }
-                k => {
-                    newc.insert(
-                        k.to_string(),
-                        content.get(k).ok_or(anyhow!("invalid cargo"))?.clone(),
-                    );
-                }
-            }
+        let mut fupddt = Vec::with_capacity(3);
+
+        for dtype in [DType::Normal, DType::Dev, DType::Build] {
+            fupddt.push(Self::update_dep_type(&content, verbose, dtype))
         }
 
-        let dfl = dfutures.len();
-        let udeps = (future::join_all(dfutures).await)
+        let tupds = (future::join_all(fupddt).await)
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
 
-        if dfl != udeps.len() {
-            return Err(anyhow!("error with updating some deps"));
-        }
-
-        let mut updates = Vec::new();
-        let mut deps = Table::new();
-        for i in 0..dfl {
-            if &old_versions[i] < &udeps[i].version {
-                updates.push((
-                    udeps[i].name.as_str(),
-                    old_versions[i].as_str(),
-                    udeps[i].version.as_str(),
-                ));
+        for dtype in [DType::Normal, DType::Dev, DType::Build] {
+            if let Some(TValue::Table(ndeps)) = content.get_mut(&dtype.to_cargo_field()) {
+                let (_, table) = tupds.iter().find(|(dt, td)| *dt == dtype).unwrap();
+                *ndeps = table.clone().unwrap();
             }
-            let (name, attrs) = udeps[i].to_toml();
-            deps.insert(name, attrs);
         }
 
-        if updates.len() == 0 {
-            println!("no need to be updated");
-            return Ok(());
-        }
+        fs::write(&self.0, toml::to_string(&content)?)?;
 
-        Printer::print_updates(&updates);
+        // println!("{tupds:#?}");
 
-        newc.insert("dependencies".to_string(), TValue::Table(deps));
-
-        fs::write(&self.0, toml::to_string(&newc)?)?;
+        // let mut newc = Table::new();
+        //
+        // let mut fupds = Vec::with_capacity(3);
+        //
+        // // let mut old_versions = Vec::new();
+        // for (k, v) in &content {
+        //     match k.as_str() {
+        //         "dependencies" => {
+        //             if let TValue::Table(deps) = v {
+        //                 fupds.push(FUpd::new(DType::Normal, &deps)?);
+        //             }
+        //         }
+        //         "dev-dependencies" => {
+        //             if let TValue::Table(deps) = v {
+        //                 fupds.push(FUpd::new(DType::Dev, &deps)?);
+        //             }
+        //         }
+        //         "build-dependencies" => {
+        //             if let TValue::Table(deps) = v {
+        //                 fupds.push(FUpd::new(DType::Build, &deps)?);
+        //             }
+        //         }
+        //         _ => {}
+        //     }
+        // }
+        //
+        // let mut wupds = Vec::with_capacity(3);
+        // for fu in fupds.into_iter() {
+        //     wupds.push(Upd::wait(fu)?);
+        // }
+        //
+        // let upds = (future::join_all(wupds).await)
+        //     .into_iter()
+        //     .flatten()
+        //     .collect::<Vec<_>>();
+        //
+        // for u in upds {
+        //     match u.dtype {
+        //         DType::Normal => {
+        //             if let Some(TValue::Table(deps)) = content.get_mut("dependencies") {}
+        //         }
+        //     }
+        // }
+        //
+        // let mut hmdeps = HashMap::new();
+        // for (k, v) in hmfut.into_iter() {
+        //     let fl = v.len();
+        //     let udeps = (future::join_all(v).await)
+        //         .into_iter()
+        //         .flatten()
+        //         .collect::<Vec<_>>();
+        //     if fl != udeps.len() {
+        //         return Err(anyhow!("ERROR: with updating some deps {}", k.to_string()));
+        //     }
+        //     hmdeps.insert(k.clone(), udeps);
+        // }
+        //
+        // let mut phmups = HashMap::new();
+        // for (k, v) in hmdeps {
+        //     match k {
+        //         DType::Normal => {
+        //             let mut ups = Vec::new();
+        //             for i in 0..v.len() {}
+        //         }
+        //     }
+        // }
+        //
+        // println!("{hmdeps:#?}");
+        //
+        // let mut updates = Vec::new();
+        // let mut deps = Table::new();
+        // for i in 0..dfl {
+        //     if &old_versions[i] < &udeps[i].version {
+        //         updates.push((
+        //             udeps[i].name.as_str(),
+        //             old_versions[i].as_str(),
+        //             udeps[i].version.as_str(),
+        //         ));
+        //     }
+        //     let (name, attrs) = udeps[i].to_toml();
+        //     deps.insert(name, attrs);
+        // }
+        //
+        // if updates.len() == 0 {
+        //     println!("no need to be updated");
+        //     return Ok(());
+        // }
+        //
+        // Printer::print_updates(&updates);
+        //
+        // newc.insert("dependencies".to_string(), TValue::Table(deps));
+        //
+        // fs::write(&self.0, toml::to_string(&newc)?)?;
 
         Ok(())
     }
