@@ -186,6 +186,19 @@ enum DType {
     OS(String),
 }
 
+impl<S: AsRef<str>> From<S> for DType {
+    fn from(s: S) -> Self {
+        let s = s.as_ref().to_lowercase();
+        match s.as_str() {
+            "dev" => Self::Dev,
+            "build" => Self::Build,
+            "normal" => Self::Normal,
+            ss if ss.trim().len() == 0 => Self::Normal,
+            os => Self::OS(os.to_string()),
+        }
+    }
+}
+
 impl DType {
     fn to_cargo_field(&self) -> String {
         match self {
@@ -455,38 +468,68 @@ impl Cargo {
         Ok(newc)
     }
     async fn append_deps<S: AsRef<str>>(&self, deps: S, verbose: bool) -> Result<()> {
+        println!("{}", "DEP(S) ADD".bold().on_cyan());
+        println!("{}", "=".repeat(40).cyan());
+
         let content = fs::read_to_string(&self.0)?;
         let mut content = content.parse::<Table>()?;
 
-        if let Some(TValue::Table(tdeps)) = content.get_mut("dependencies") {
-            let mut pdeps = parse_deps(deps)?;
-            let mut fdeps = Vec::new();
-            for pd in &pdeps {
-                fdeps.push(fetch_crates_dep(&pd.name));
-            }
-
-            let fdl = fdeps.len();
-            let fdeps = (future::join_all(fdeps).await)
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>();
-
-            if fdl != fdeps.len() {
-                return Err(anyhow!("error with fetching some deps"));
-            }
-
-            let mut adeps = Vec::new();
-            for i in 0..fdl {
-                let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
-                let (name, attrs) = d.to_toml();
-                adeps.push((d.name.clone(), d.version.clone(), d.features.is_some()));
-                tdeps.insert(name, attrs);
-            }
-
-            fs::write(&self.0, toml::to_string(&content)?)?;
-
-            Printer::added_many(&adeps);
+        let mut pdeps = parse_deps(deps)?;
+        let mut fdeps = Vec::new();
+        for pd in &pdeps {
+            fdeps.push(fetch_crates_dep(&pd.name));
         }
+        let fdl = fdeps.len();
+        let fdeps = (future::join_all(fdeps).await)
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        if fdl != fdeps.len() {
+            return Err(anyhow!(
+                "error fetching some dependencies: {}",
+                fdl - fdeps.len()
+            ));
+        }
+
+        let mut hmdeps = HashMap::new();
+        for i in 0..fdl {
+            let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
+            hmdeps
+                .entry(DType::from(&pdeps[i].target))
+                .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
+                .or_insert(vec![d]);
+        }
+
+        for (t, ds) in hmdeps {
+            println!("{}", t.to_cargo_field().bold().green());
+
+            let mnl = ds.iter().map(|d| d.name.len()).max().unwrap();
+            let mvl = ds.iter().map(|d| d.version.len()).max().unwrap();
+
+            match content.get_mut(&t.to_cargo_field()) {
+                Some(TValue::Table(deps)) => {
+                    for d in ds {
+                        d.print_pretty(mnl, mvl, 2);
+                        let (name, attrs) = d.to_toml();
+                        deps.insert(name, attrs);
+                    }
+                }
+                Some(_) => println!("tipatipitiritoutou"),
+                None => {
+                    let mut deps = Table::new();
+                    for d in ds {
+                        d.print_pretty(mnl, mvl, 2);
+                        let (name, attrs) = d.to_toml();
+                        deps.insert(name, attrs);
+                    }
+                    content.insert(t.to_cargo_field(), TValue::Table(deps));
+                }
+            }
+        }
+
+        fs::write(&self.0, toml::to_string(&content)?)?;
+
+        println!("{}", "=".repeat(40).cyan());
 
         Ok(())
     }
@@ -508,7 +551,6 @@ impl Cargo {
                 &cur_deps,
                 needs_remove == (before_remove - after_remove),
             );
-            // println!("{:#?}", &deps);
 
             fs::write(&self.0, toml::to_string(&content)?)?;
         }
@@ -817,6 +859,27 @@ struct Dep {
 }
 
 impl Dep {
+    fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize) {
+        if let Some(fs) = &self.features {
+            println!(
+                "{}{:<mnl$} {} {:<mvl$} {} {}",
+                " ".repeat(tabbing),
+                &self.name.bold(),
+                "@".dimmed(),
+                &self.version.yellow(),
+                ":".dimmed(),
+                fs.join(", ").red(),
+            );
+        } else {
+            println!(
+                "{}{:<mnl$} {} {:<mvl$}",
+                " ".repeat(tabbing),
+                &self.name.bold(),
+                "@".dimmed(),
+                &self.version.yellow()
+            );
+        }
+    }
     fn to_cargo_str(&self) -> String {
         match &self.features {
             Some(fs) => format!(
