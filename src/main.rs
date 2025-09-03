@@ -419,6 +419,9 @@ impl Cargo {
         Ok(())
     }
     async fn init_project<S: AsRef<str>>(deps: S, verbose: bool) -> Result<String> {
+        println!("{}", "INIT".bold().on_cyan());
+        println!("{}", "=".repeat(40).cyan());
+
         let mut newc = Table::new();
 
         let mut project = Table::new();
@@ -450,22 +453,41 @@ impl Cargo {
             return Err(anyhow!("error with fetching some deps"));
         }
 
-        let mut depst = Table::new();
-        let mut depsafp = Vec::new();
+        let mut hmdeps = HashMap::new();
+
+        let mut mnl = 0;
+        let mut mvl = 0;
+
         for i in 0..fdl {
             let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
-
-            depsafp.push((d.name.clone(), d.version.clone(), d.features.is_some()));
-            let (name, attrs) = d.to_toml();
-            depst.insert(name, attrs);
+            if mnl < d.name.len() {
+                mnl = d.name.len();
+            }
+            if mvl < d.version.len() {
+                mvl = d.version.len();
+            }
+            hmdeps
+                .entry(DType::from(&pdeps[i].target))
+                .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
+                .or_insert(vec![d]);
         }
 
-        Printer::print_init_deps(&depsafp);
+        for (t, ds) in hmdeps {
+            println!("{}", t.to_cargo_field().bold().green());
 
-        newc.insert("dependencies".to_string(), TValue::Table(depst));
-        let newc = toml::to_string(&newc)?;
+            let mut tdeps = Table::new();
+            for d in ds {
+                d.print_pretty(mnl, mvl, 2);
+                let (name, attrs) = d.to_toml();
+                tdeps.insert(name, attrs);
+            }
 
-        Ok(newc)
+            newc.insert(t.to_cargo_field(), TValue::Table(tdeps));
+        }
+
+        println!("{}", "=".repeat(40).cyan());
+
+        Ok(toml::to_string(&newc)?)
     }
     async fn append_deps<S: AsRef<str>>(&self, deps: S, verbose: bool) -> Result<()> {
         println!("{}", "DEP(S) ADD".bold().on_cyan());
@@ -491,9 +513,19 @@ impl Cargo {
             ));
         }
 
+        let mut mnl = 0;
+        let mut mvl = 0;
+
         let mut hmdeps = HashMap::new();
         for i in 0..fdl {
             let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
+            if mnl < d.name.len() {
+                mnl = d.name.len();
+            }
+            if mvl < d.version.len() {
+                mvl = d.version.len();
+            }
+
             hmdeps
                 .entry(DType::from(&pdeps[i].target))
                 .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
@@ -502,9 +534,6 @@ impl Cargo {
 
         for (t, ds) in hmdeps {
             println!("{}", t.to_cargo_field().bold().green());
-
-            let mnl = ds.iter().map(|d| d.name.len()).max().unwrap();
-            let mvl = ds.iter().map(|d| d.version.len()).max().unwrap();
 
             match content.get_mut(&t.to_cargo_field()) {
                 Some(TValue::Table(deps)) => {
@@ -564,29 +593,44 @@ impl Cargo {
             .collect()
     }
     async fn list(&self, verbose: bool) -> Result<()> {
+        println!("{}", "DEP(S) ADD".bold().on_cyan());
+        println!("{}", "=".repeat(40).cyan());
+
         let content = fs::read_to_string(&self.0)?.parse::<Table>()?;
-        let mut deps_by_type: HashMap<DType, Vec<Dep>> = HashMap::new();
-        for (k, v) in content {
-            match k.as_str() {
-                "dependencies" => {
-                    if let TValue::Table(v) = v {
-                        deps_by_type.insert(DType::Normal, Self::_get_deps_from_value(&v).await);
+
+        let mut mnl = 0;
+        let mut mvl = 0;
+
+        let mut hmdeps = HashMap::new();
+
+        for dtype in [DType::Normal, DType::Dev, DType::Build] {
+            let dtcf = dtype.to_cargo_field();
+            if let Some(TValue::Table(deps)) = content.get(&dtcf) {
+                for (n, ats) in deps {
+                    let d = Dep::from_toml(n, ats.clone())?;
+                    if mnl < d.name.len() {
+                        mnl = d.name.len();
                     }
-                }
-                "dev-dependencies" => {
-                    if let TValue::Table(v) = v {
-                        deps_by_type.insert(DType::Dev, Self::_get_deps_from_value(&v).await);
+                    if mvl < d.version.len() {
+                        mvl = d.version.len();
                     }
+
+                    hmdeps
+                        .entry(dtype.clone())
+                        .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
+                        .or_insert(vec![d]);
                 }
-                "build-dependencies" => {
-                    if let TValue::Table(v) = v {
-                        deps_by_type.insert(DType::Build, Self::_get_deps_from_value(&v).await);
-                    }
-                }
-                _ => {}
             }
         }
-        Printer::list_deps(&deps_by_type);
+
+        for (t, ds) in hmdeps {
+            println!("{}", t.to_cargo_field().bold().green());
+            for d in ds {
+                d.print_pretty(mnl, mvl, 2);
+            }
+        }
+
+        println!("{}", "=".repeat(40).cyan());
         Ok(())
     }
     fn from_cur() -> Result<Self> {
