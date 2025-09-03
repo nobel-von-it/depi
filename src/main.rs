@@ -593,7 +593,7 @@ impl Cargo {
             .collect()
     }
     async fn list(&self, verbose: bool) -> Result<()> {
-        println!("{}", "DEP(S) ADD".bold().on_cyan());
+        println!("{}", "DEPS LIST".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
         let content = fs::read_to_string(&self.0)?.parse::<Table>()?;
