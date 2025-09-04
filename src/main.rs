@@ -591,14 +591,22 @@ impl Cargo {
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
-            println!("{}", dtcf.bold().red());
             if let Some(TValue::Table(deps)) = content.get_mut(&dtcf) {
-                let needs_remove = names.len();
+                let mut removed_deps = Vec::new();
                 for (k, v) in deps.iter() {
                     if names.contains(&k.as_str()) {
                         let d = Dep::from_toml(k, v.clone())?;
-                        d.print_pretty(mnl, mvl, 2);
+                        removed_deps.push(d);
                     }
+                }
+
+                if removed_deps.is_empty() {
+                    continue;
+                }
+
+                println!("{}", dtcf.bold().red());
+                for d in removed_deps {
+                    d.print_pretty(mnl, mvl, 2);
                 }
                 deps.retain(|k, v| !names.contains(&k));
                 if deps.is_empty() {
