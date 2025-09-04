@@ -5,7 +5,7 @@ use futures::{Future, future};
 use serde_json::{Value as JValue, from_str};
 use toml::{Table, Value as TValue, value::Array};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::Write;
@@ -18,165 +18,165 @@ fn main() {
 }
 "#;
 
-struct Printer;
-impl Printer {
-    fn list_deps(deps: &HashMap<DType, Vec<Dep>>) {
-        println!("{}", "DEPS LS".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        let mut mnl = 0;
-        let mut mvl = 0;
-
-        for (_, ds) in deps {
-            mnl = mnl.max(ds.iter().map(|d| d.name.len()).max().unwrap());
-            mvl = mnl.max(ds.iter().map(|d| d.version.len()).max().unwrap());
-        }
-
-        for (t, ds) in deps {
-            println!("{}", t.to_string().to_uppercase().bold());
-            for d in ds {
-                if let Some(fs) = &d.features {
-                    let fs = fs.join(", ");
-                    println!(
-                        "  - {:<mnl$} @ {:<mvl$} : {}",
-                        d.name.bold().green(),
-                        d.version.yellow(),
-                        fs.red()
-                    )
-                } else {
-                    println!(
-                        "  - {:<mnl$} @ {:<mvl$}",
-                        d.name.bold().green(),
-                        d.version.yellow()
-                    )
-                }
-            }
-            println!("{}", "=".repeat(40).cyan());
-            println!()
-        }
-    }
-    fn remove_deps(removed: &[&str], remained: &[&str], all_removed: bool) {
-        println!("{}", "DEPS TO REMOVE".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        // let mut mnl = (removed.iter().map(|d| d.len()).max().unwrap())
-        //     .max(remained.iter().map(|d| d.len()).max().unwrap());
-
-        for name in removed {
-            println!("{}", name.red());
-        }
-
-        println!("{}", "DEPS TO REMAIN".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        for name in remained {
-            println!("{}", name.bold().green())
-        }
-
-        println!("{}", "=".repeat(40).cyan());
-
-        if all_removed {
-            println!("{}", "all deps removed successfully".green());
-        } else {
-            println!("{}", "something went wrong (ignore or error)".red());
-        }
-    }
-    fn added_many(added: &[(String, String, bool)]) {
-        println!("{}", "DEPS ADD".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        let mnl = added.iter().map(|(n, _, _)| n.len()).max().unwrap();
-        let mvl = added
-            .iter()
-            .map(|(_, v, _)| v.to_string().len())
-            .max()
-            .unwrap();
-        for (name, version, is_features) in added {
-            println!(
-                "{:<mnl$} {:<mvl$} {}",
-                name.bold(),
-                version.yellow().bold(),
-                if *is_features {
-                    "with features".dimmed()
-                } else {
-                    "without features".dimmed()
-                }
-            );
-        }
-
-        println!("{}", "=".repeat(40).cyan());
-    }
-    fn not_added<S: AsRef<str>>(name: S) {
-        println!("{}", "DEP ADD".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        println!("{} already in the Cargo file", name.as_ref().bold().red());
-
-        println!("{}", "=".repeat(40).cyan());
-    }
-    fn added<S: AsRef<str>>(name: S) {
-        println!("{}", "DEPS ADD".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        println!(
-            "{} succfully add to the Cargo file",
-            name.as_ref().bold().green()
-        );
-
-        println!("{}", "=".repeat(40).cyan());
-    }
-    fn print_updates(updates: &[(&str, &str, &str)]) {
-        println!("{}", "DEPS UP".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        let mnl = updates.iter().map(|(n, _, _)| n.len()).max().unwrap();
-        let mfl = updates
-            .iter()
-            .map(|(_, f, _)| f.to_string().len())
-            .max()
-            .unwrap();
-        for (name, from, to) in updates {
-            println!(
-                "  {:<mnl$} {:<mfl$} -> {}",
-                name.bold(),
-                from.dimmed(),
-                to.yellow().bold()
-            );
-        }
-
-        println!("{}", "=".repeat(40).cyan());
-
-        println!(
-            "{}",
-            format!("updated {} dep(s)", updates.len()).green().bold()
-        )
-    }
-    fn print_init_deps(deps: &[(String, String, bool)]) {
-        println!("{}", "INIT DEPS IN CARGO".bold().cyan());
-        println!("{}", "=".repeat(40).cyan());
-
-        let mnl = deps.iter().map(|(n, _, _)| n.len()).max().unwrap();
-        let mvl = deps
-            .iter()
-            .map(|(_, v, _)| v.to_string().len())
-            .max()
-            .unwrap();
-        for (name, version, is_features) in deps {
-            println!(
-                "{:<mnl$} {:<mvl$} {}",
-                name.bold(),
-                version.yellow().bold(),
-                if *is_features {
-                    "with features".dimmed()
-                } else {
-                    "without features".dimmed()
-                }
-            );
-        }
-
-        println!("{}", "=".repeat(40).cyan());
-    }
-}
+// struct Printer;
+// impl Printer {
+//     fn list_deps(deps: &HashMap<DType, Vec<Dep>>) {
+//         println!("{}", "DEPS LS".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         let mut mnl = 0;
+//         let mut mvl = 0;
+//
+//         for (_, ds) in deps {
+//             mnl = mnl.max(ds.iter().map(|d| d.name.len()).max().unwrap());
+//             mvl = mnl.max(ds.iter().map(|d| d.version.len()).max().unwrap());
+//         }
+//
+//         for (t, ds) in deps {
+//             println!("{}", t.to_string().to_uppercase().bold());
+//             for d in ds {
+//                 if let Some(fs) = &d.features {
+//                     let fs = fs.join(", ");
+//                     println!(
+//                         "  - {:<mnl$} @ {:<mvl$} : {}",
+//                         d.name.bold().green(),
+//                         d.version.yellow(),
+//                         fs.red()
+//                     )
+//                 } else {
+//                     println!(
+//                         "  - {:<mnl$} @ {:<mvl$}",
+//                         d.name.bold().green(),
+//                         d.version.yellow()
+//                     )
+//                 }
+//             }
+//             println!("{}", "=".repeat(40).cyan());
+//             println!()
+//         }
+//     }
+//     fn remove_deps(removed: &[&str], remained: &[&str], all_removed: bool) {
+//         println!("{}", "DEPS TO REMOVE".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         // let mut mnl = (removed.iter().map(|d| d.len()).max().unwrap())
+//         //     .max(remained.iter().map(|d| d.len()).max().unwrap());
+//
+//         for name in removed {
+//             println!("{}", name.red());
+//         }
+//
+//         println!("{}", "DEPS TO REMAIN".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         for name in remained {
+//             println!("{}", name.bold().green())
+//         }
+//
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         if all_removed {
+//             println!("{}", "all deps removed successfully".green());
+//         } else {
+//             println!("{}", "something went wrong (ignore or error)".red());
+//         }
+//     }
+//     fn added_many(added: &[(String, String, bool)]) {
+//         println!("{}", "DEPS ADD".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         let mnl = added.iter().map(|(n, _, _)| n.len()).max().unwrap();
+//         let mvl = added
+//             .iter()
+//             .map(|(_, v, _)| v.to_string().len())
+//             .max()
+//             .unwrap();
+//         for (name, version, is_features) in added {
+//             println!(
+//                 "{:<mnl$} {:<mvl$} {}",
+//                 name.bold(),
+//                 version.yellow().bold(),
+//                 if *is_features {
+//                     "with features".dimmed()
+//                 } else {
+//                     "without features".dimmed()
+//                 }
+//             );
+//         }
+//
+//         println!("{}", "=".repeat(40).cyan());
+//     }
+//     fn not_added<S: AsRef<str>>(name: S) {
+//         println!("{}", "DEP ADD".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         println!("{} already in the Cargo file", name.as_ref().bold().red());
+//
+//         println!("{}", "=".repeat(40).cyan());
+//     }
+//     fn added<S: AsRef<str>>(name: S) {
+//         println!("{}", "DEPS ADD".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         println!(
+//             "{} succfully add to the Cargo file",
+//             name.as_ref().bold().green()
+//         );
+//
+//         println!("{}", "=".repeat(40).cyan());
+//     }
+//     fn print_updates(updates: &[(&str, &str, &str)]) {
+//         println!("{}", "DEPS UP".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         let mnl = updates.iter().map(|(n, _, _)| n.len()).max().unwrap();
+//         let mfl = updates
+//             .iter()
+//             .map(|(_, f, _)| f.to_string().len())
+//             .max()
+//             .unwrap();
+//         for (name, from, to) in updates {
+//             println!(
+//                 "  {:<mnl$} {:<mfl$} -> {}",
+//                 name.bold(),
+//                 from.dimmed(),
+//                 to.yellow().bold()
+//             );
+//         }
+//
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         println!(
+//             "{}",
+//             format!("updated {} dep(s)", updates.len()).green().bold()
+//         )
+//     }
+//     fn print_init_deps(deps: &[(String, String, bool)]) {
+//         println!("{}", "INIT DEPS IN CARGO".bold().cyan());
+//         println!("{}", "=".repeat(40).cyan());
+//
+//         let mnl = deps.iter().map(|(n, _, _)| n.len()).max().unwrap();
+//         let mvl = deps
+//             .iter()
+//             .map(|(_, v, _)| v.to_string().len())
+//             .max()
+//             .unwrap();
+//         for (name, version, is_features) in deps {
+//             println!(
+//                 "{:<mnl$} {:<mvl$} {}",
+//                 name.bold(),
+//                 version.yellow().bold(),
+//                 if *is_features {
+//                     "with features".dimmed()
+//                 } else {
+//                     "without features".dimmed()
+//                 }
+//             );
+//         }
+//
+//         println!("{}", "=".repeat(40).cyan());
+//     }
+// }
 
 #[derive(Hash, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum DType {
@@ -563,27 +563,53 @@ impl Cargo {
         Ok(())
     }
     async fn remove_deps<S: AsRef<str>>(&self, names: S, verbose: bool) -> Result<()> {
+        println!("{}", "DEP(S) REM".bold().on_cyan());
+        println!("{}", "=".repeat(40).cyan());
+
         let mut content = fs::read_to_string(&self.0)?.parse::<Table>()?;
+        let names = names.as_ref().trim().split(",").collect::<HashSet<_>>();
 
-        let names = names.as_ref().trim().split(",").collect::<Vec<_>>();
-        if let Some(TValue::Table(deps)) = content.get_mut("dependencies") {
-            let needs_remove = names.len();
+        let mut mnl = 0;
+        let mut mvl = 0;
 
-            let before_remove = deps.len();
-            deps.retain(|k, v| !names.contains(&k));
-            let after_remove = deps.len();
-
-            let cur_deps = deps.iter().map(|(dk, _)| dk.as_str()).collect::<Vec<_>>();
-
-            Printer::remove_deps(
-                &names,
-                &cur_deps,
-                needs_remove == (before_remove - after_remove),
-            );
-
-            fs::write(&self.0, toml::to_string(&content)?)?;
+        for dtype in [DType::Normal, DType::Dev, DType::Build] {
+            let dtcf = dtype.to_cargo_field();
+            if let Some(TValue::Table(deps)) = content.get(&dtcf) {
+                for (k, v) in deps.iter() {
+                    if names.contains(&k.as_str()) {
+                        let d = Dep::from_toml(k, v.clone())?;
+                        if d.name.len() > mnl {
+                            mnl = d.name.len();
+                        }
+                        if d.version.len() > mvl {
+                            mvl = d.version.len();
+                        }
+                    }
+                }
+            }
         }
 
+        for dtype in [DType::Normal, DType::Dev, DType::Build] {
+            let dtcf = dtype.to_cargo_field();
+            println!("{}", dtcf.bold().red());
+            if let Some(TValue::Table(deps)) = content.get_mut(&dtcf) {
+                let needs_remove = names.len();
+                for (k, v) in deps.iter() {
+                    if names.contains(&k.as_str()) {
+                        let d = Dep::from_toml(k, v.clone())?;
+                        d.print_pretty(mnl, mvl, 2);
+                    }
+                }
+                deps.retain(|k, v| !names.contains(&k));
+                if deps.is_empty() {
+                    content.remove(&dtcf);
+                }
+            }
+        }
+
+        println!("{}", "=".repeat(40).cyan());
+
+        fs::write(&self.0, toml::to_string(&content)?)?;
         Ok(())
     }
     async fn _get_deps_from_value(t: &Table) -> Vec<Dep> {
@@ -903,6 +929,15 @@ struct Dep {
 }
 
 impl Dep {
+    // fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize, is_green: bool) {
+    //     if is_green {
+    //         self.print_pretty_gr(mnl, mvl, tabbing)
+    //     } else {
+    //         self.print_pretty_rd(mnl, mvl, tabbing)
+    //     }
+    // }
+    // fn print_pretty_rd(&self, mnl: usize, mvl: usize, tabbing: usize) {
+    // }
     fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize) {
         if let Some(fs) = &self.features {
             println!(
