@@ -686,8 +686,8 @@ impl OrdVersion {
 
         let mut s = s.as_ref();
 
-        if let Some((left, _)) = s.split_once("-") {
-            s = left.trim();
+        if let Some((_, right)) = s.split_once("-") {
+            return Err(anyhow!("version with suffix {right} is not supported"));
         }
         let start = s.chars().nth(0).unwrap();
         if !start.is_ascii_digit() {
@@ -728,7 +728,7 @@ impl CratesDep {
     fn get_last_version(&self) -> String {
         self.versions
             .iter()
-            .filter_map(|(v, _)| OrdVersion::parse(v).map_err(|e| eprintln!("{e:#?}")).ok())
+            .filter_map(|(v, _)| OrdVersion::parse(v).ok())
             .max()
             .unwrap()
             .to_string()
