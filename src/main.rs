@@ -1,7 +1,7 @@
 use anyhow::{Error, Result, anyhow};
 use clap::{Parser, Subcommand};
 use colored::*;
-use futures::{Future, future};
+use futures::future;
 use serde_json::{Value as JValue, from_str};
 use toml::{Table, Value as TValue, value::Array};
 
@@ -17,166 +17,6 @@ fn main() {
     println!("Hello Depi!");
 }
 "#;
-
-// struct Printer;
-// impl Printer {
-//     fn list_deps(deps: &HashMap<DType, Vec<Dep>>) {
-//         println!("{}", "DEPS LS".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         let mut mnl = 0;
-//         let mut mvl = 0;
-//
-//         for (_, ds) in deps {
-//             mnl = mnl.max(ds.iter().map(|d| d.name.len()).max().unwrap());
-//             mvl = mnl.max(ds.iter().map(|d| d.version.len()).max().unwrap());
-//         }
-//
-//         for (t, ds) in deps {
-//             println!("{}", t.to_string().to_uppercase().bold());
-//             for d in ds {
-//                 if let Some(fs) = &d.features {
-//                     let fs = fs.join(", ");
-//                     println!(
-//                         "  - {:<mnl$} @ {:<mvl$} : {}",
-//                         d.name.bold().green(),
-//                         d.version.yellow(),
-//                         fs.red()
-//                     )
-//                 } else {
-//                     println!(
-//                         "  - {:<mnl$} @ {:<mvl$}",
-//                         d.name.bold().green(),
-//                         d.version.yellow()
-//                     )
-//                 }
-//             }
-//             println!("{}", "=".repeat(40).cyan());
-//             println!()
-//         }
-//     }
-//     fn remove_deps(removed: &[&str], remained: &[&str], all_removed: bool) {
-//         println!("{}", "DEPS TO REMOVE".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         // let mut mnl = (removed.iter().map(|d| d.len()).max().unwrap())
-//         //     .max(remained.iter().map(|d| d.len()).max().unwrap());
-//
-//         for name in removed {
-//             println!("{}", name.red());
-//         }
-//
-//         println!("{}", "DEPS TO REMAIN".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         for name in remained {
-//             println!("{}", name.bold().green())
-//         }
-//
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         if all_removed {
-//             println!("{}", "all deps removed successfully".green());
-//         } else {
-//             println!("{}", "something went wrong (ignore or error)".red());
-//         }
-//     }
-//     fn added_many(added: &[(String, String, bool)]) {
-//         println!("{}", "DEPS ADD".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         let mnl = added.iter().map(|(n, _, _)| n.len()).max().unwrap();
-//         let mvl = added
-//             .iter()
-//             .map(|(_, v, _)| v.to_string().len())
-//             .max()
-//             .unwrap();
-//         for (name, version, is_features) in added {
-//             println!(
-//                 "{:<mnl$} {:<mvl$} {}",
-//                 name.bold(),
-//                 version.yellow().bold(),
-//                 if *is_features {
-//                     "with features".dimmed()
-//                 } else {
-//                     "without features".dimmed()
-//                 }
-//             );
-//         }
-//
-//         println!("{}", "=".repeat(40).cyan());
-//     }
-//     fn not_added<S: AsRef<str>>(name: S) {
-//         println!("{}", "DEP ADD".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         println!("{} already in the Cargo file", name.as_ref().bold().red());
-//
-//         println!("{}", "=".repeat(40).cyan());
-//     }
-//     fn added<S: AsRef<str>>(name: S) {
-//         println!("{}", "DEPS ADD".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         println!(
-//             "{} succfully add to the Cargo file",
-//             name.as_ref().bold().green()
-//         );
-//
-//         println!("{}", "=".repeat(40).cyan());
-//     }
-//     fn print_updates(updates: &[(&str, &str, &str)]) {
-//         println!("{}", "DEPS UP".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         let mnl = updates.iter().map(|(n, _, _)| n.len()).max().unwrap();
-//         let mfl = updates
-//             .iter()
-//             .map(|(_, f, _)| f.to_string().len())
-//             .max()
-//             .unwrap();
-//         for (name, from, to) in updates {
-//             println!(
-//                 "  {:<mnl$} {:<mfl$} -> {}",
-//                 name.bold(),
-//                 from.dimmed(),
-//                 to.yellow().bold()
-//             );
-//         }
-//
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         println!(
-//             "{}",
-//             format!("updated {} dep(s)", updates.len()).green().bold()
-//         )
-//     }
-//     fn print_init_deps(deps: &[(String, String, bool)]) {
-//         println!("{}", "INIT DEPS IN CARGO".bold().cyan());
-//         println!("{}", "=".repeat(40).cyan());
-//
-//         let mnl = deps.iter().map(|(n, _, _)| n.len()).max().unwrap();
-//         let mvl = deps
-//             .iter()
-//             .map(|(_, v, _)| v.to_string().len())
-//             .max()
-//             .unwrap();
-//         for (name, version, is_features) in deps {
-//             println!(
-//                 "{:<mnl$} {:<mvl$} {}",
-//                 name.bold(),
-//                 version.yellow().bold(),
-//                 if *is_features {
-//                     "with features".dimmed()
-//                 } else {
-//                     "without features".dimmed()
-//                 }
-//             );
-//         }
-//
-//         println!("{}", "=".repeat(40).cyan());
-//     }
-// }
 
 #[derive(Hash, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum DType {
@@ -290,132 +130,114 @@ enum DepiCommand {
     },
 }
 
-fn _start_update_futures_from_toml_table(
-    deps: &Table,
-) -> Result<(Vec<String>, Vec<impl Future<Output = Result<Dep, Error>>>)> {
-    let mut oldvs = Vec::new();
-    let mut ress = Vec::new();
-    for (dk, dv) in deps {
-        let d = Dep::from_toml(dk, dv.clone())?;
-        oldvs.push(d.version.clone());
-        ress.push(d.update_version());
-    }
-
-    Ok((oldvs, ress))
-}
-
-async fn _update_deps_by_table_and_type(
-    deps: &Table,
-    dtype: DType,
-    verbose: bool,
-) -> Result<(DType, Option<Table>)> {
-    if deps.is_empty() {
-        return Ok((dtype.clone(), None));
-    }
-
-    let mut ovs = Vec::new();
-    let mut fdeps = Vec::new();
-    for (k, v) in deps {
-        let d = Dep::from_toml(k, v.clone())?;
-        ovs.push(d.version.clone());
-        fdeps.push(d.update_version());
-    }
-
-    let fdl = fdeps.len();
-    let udeps = (future::join_all(fdeps).await)
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    if fdl != udeps.len() {
-        return Err(anyhow!(
-            "ERROR: with updating some deps {}",
-            dtype.to_string()
-        ));
-    }
-
-    let mnl = udeps.iter().map(|d| d.name.len()).max().unwrap();
-    let mvl = ovs.iter().map(|v| v.len()).max().unwrap();
-
-    let mut rest = Table::new();
-    let mut latest = 0;
-    for i in 0..fdl {
-        if ovs[i] < udeps[i].version {
-            println!(
-                "{} {} -> {}",
-                &udeps[i].name.bold().green(),
-                &ovs[i].dimmed(),
-                &udeps[i].version.bold().yellow()
-            );
-        } else {
-            latest += 1;
-        }
-
-        let (name, attrs) = udeps[i].to_toml();
-        rest.insert(name, attrs);
-    }
-
-    if fdl == latest {
-        println!(
-            "all deps in {} are {}",
-            dtype.to_cargo_field().bold(),
-            "latest".bold().green()
-        );
-    } else {
-        println!(
-            "{} dep(s) in {} are latest",
-            latest.to_string().bold().green(),
-            dtype.to_cargo_field().bold()
-        );
-    }
-
-    println!("{}", "=".repeat(40).cyan());
-
-    Ok((dtype.clone(), Some(rest)))
-}
-
 struct Cargo(PathBuf);
 
 impl Cargo {
-    async fn update_dep_type(
-        content: &Table,
-        verbose: bool,
-        dtype: DType,
-    ) -> Result<(DType, Option<Table>)> {
-        if let Some(TValue::Table(deps)) = content.get(&dtype.to_cargo_field()) {
-            return Ok(_update_deps_by_table_and_type(&deps, dtype, verbose).await?);
+    fn update_dep_type(deps: &Table, verbose: bool) -> Result<(Vec<Dep>, Vec<String>)> {
+        let mut fds = Vec::new();
+        let mut vds = Vec::new();
+        for (k, v) in deps {
+            let d = Dep::from_toml(k, v.clone())?;
+            vds.push(d.version.clone());
+            fds.push(d);
         }
-        Ok((dtype.clone(), None))
+
+        Ok((fds, vds))
     }
     async fn update_deps(&self, verbose: bool) -> Result<()> {
         println!("{}", "DEPS UP".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
         let content = fs::read_to_string(&self.0)?;
-        if verbose {
-            println!("INFO: start updating {} file", self.0.display())
-        }
         let mut content = content.parse::<Table>()?;
-
-        let mut fupddt = Vec::with_capacity(3);
+        let mut futures = Vec::new();
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
-            fupddt.push(Self::update_dep_type(&content, verbose, dtype))
+            let dtcf = dtype.to_cargo_field();
+            if let Some(TValue::Table(deps)) = content.get(dtcf.as_str()) {
+                futures.push(async move {
+                    let (fds, vds) = Self::update_dep_type(&deps, verbose)?;
+                    let ufds = fds
+                        .into_iter()
+                        .map(|d| d.update_version())
+                        .collect::<Vec<_>>();
+                    let uds = (future::join_all(ufds).await)
+                        .into_iter()
+                        .flatten()
+                        .collect::<Vec<_>>();
+
+                    Ok::<_, anyhow::Error>((dtype, uds, vds))
+                });
+            }
         }
 
-        let tupds = (future::join_all(fupddt).await)
+        let frs = (future::join_all(futures).await)
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
 
-        for dtype in [DType::Normal, DType::Dev, DType::Build] {
-            if let Some(TValue::Table(ndeps)) = content.get_mut(&dtype.to_cargo_field()) {
-                let (_, table) = tupds.iter().find(|(dt, td)| *dt == dtype).unwrap();
-                *ndeps = table.clone().unwrap();
+        let mut mnl = 0;
+        let mut mvl = 0;
+
+        for fr in &frs {
+            let (_, uds, _) = fr;
+
+            for ud in uds {
+                if mnl < ud.name.len() {
+                    mnl = ud.name.len();
+                }
+                if mvl < ud.version.len() {
+                    mvl = ud.version.len();
+                }
+            }
+        }
+
+        for fr in frs {
+            let (dtype, uds, vds) = fr;
+
+            let dtcf = dtype.to_cargo_field();
+
+            if let Some(TValue::Table(deps)) = content.get_mut(&dtcf) {
+                let mut ndeps = Table::new();
+                for ud in &uds {
+                    let (name, attrs) = ud.to_toml();
+                    ndeps.insert(name, attrs);
+                }
+                *deps = ndeps
+            }
+
+            let mut changed = 0;
+            for i in 0..uds.len() {
+                if uds[i].version > vds[i] {
+                    changed += 1;
+                }
+            }
+
+            if changed > 0 {
+                println!("{}", dtype.to_cargo_field().green());
+                if uds.len() != vds.len() {
+                    return Err(anyhow!(
+                        "damn error in fetching and updating deps: {}",
+                        vds.len() - uds.len()
+                    ));
+                }
+                for i in 0..uds.len() {
+                    if uds[i].version > vds[i] {
+                        println!(
+                            "  {:<mnl$} {:<mvl$} {} {}",
+                            uds[i].name.bold(),
+                            vds[i].yellow(),
+                            "->".dimmed(),
+                            uds[i].version.green()
+                        );
+                    }
+                }
             }
         }
 
         fs::write(&self.0, toml::to_string(&content)?)?;
 
+        println!("{}", "=".repeat(40).cyan());
         Ok(())
     }
     async fn init_project<S: AsRef<str>>(deps: S, verbose: bool) -> Result<String> {
@@ -477,7 +299,7 @@ impl Cargo {
 
             let mut tdeps = Table::new();
             for d in ds {
-                d.print_pretty(mnl, mvl, 2);
+                d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
                 let (name, attrs) = d.to_toml();
                 tdeps.insert(name, attrs);
             }
@@ -496,7 +318,7 @@ impl Cargo {
         let content = fs::read_to_string(&self.0)?;
         let mut content = content.parse::<Table>()?;
 
-        let mut pdeps = parse_deps(deps)?;
+        let pdeps = parse_deps(deps)?;
         let mut fdeps = Vec::new();
         for pd in &pdeps {
             fdeps.push(fetch_crates_dep(&pd.name));
@@ -538,7 +360,7 @@ impl Cargo {
             match content.get_mut(&t.to_cargo_field()) {
                 Some(TValue::Table(deps)) => {
                     for d in ds {
-                        d.print_pretty(mnl, mvl, 2);
+                        d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -547,7 +369,7 @@ impl Cargo {
                 None => {
                     let mut deps = Table::new();
                     for d in ds {
-                        d.print_pretty(mnl, mvl, 2);
+                        d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -606,9 +428,9 @@ impl Cargo {
 
                 println!("{}", dtcf.bold().red());
                 for d in removed_deps {
-                    d.print_pretty(mnl, mvl, 2);
+                    d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
                 }
-                deps.retain(|k, v| !names.contains(&k));
+                deps.retain(|k, _| !names.contains(&k));
                 if deps.is_empty() {
                     content.remove(&dtcf);
                 }
@@ -660,7 +482,7 @@ impl Cargo {
         for (t, ds) in hmdeps {
             println!("{}", t.to_cargo_field().bold().green());
             for d in ds {
-                d.print_pretty(mnl, mvl, 2);
+                d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
             }
         }
 
@@ -823,7 +645,6 @@ fn parse_dep<S: AsRef<str>>(s: S) -> Result<PDep> {
     let mut features = String::new();
     let mut target = String::new();
 
-    let mut once_name = false;
     let mut once_version = false;
     let mut once_features = false;
     let mut once_target = false;
@@ -909,24 +730,12 @@ fn parse_dep<S: AsRef<str>>(s: S) -> Result<PDep> {
     })
 }
 
-#[derive(Debug, Clone)]
-enum DTarget {
-    Normal,
-    Dev,
-    Build,
-    OS(String),
-}
-
-impl<S: AsRef<str>> From<S> for DTarget {
-    fn from(s: S) -> Self {
-        let s = s.as_ref();
-        match s {
-            "normal" => Self::Normal,
-            "dev" => Self::Dev,
-            "build" => Self::Build,
-            os => Self::OS(os.to_string()),
-        }
-    }
+#[derive(Default, Clone, Copy)]
+enum DColorType {
+    #[default]
+    WithoutColor,
+    GOIDA,
+    Osetia,
 }
 
 #[derive(Debug, Clone)]
@@ -937,48 +746,71 @@ struct Dep {
 }
 
 impl Dep {
-    // fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize, is_green: bool) {
-    //     if is_green {
-    //         self.print_pretty_gr(mnl, mvl, tabbing)
-    //     } else {
-    //         self.print_pretty_rd(mnl, mvl, tabbing)
-    //     }
-    // }
-    // fn print_pretty_rd(&self, mnl: usize, mvl: usize, tabbing: usize) {
-    // }
-    fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize) {
-        if let Some(fs) = &self.features {
-            println!(
-                "{}{:<mnl$} {} {:<mvl$} {} {}",
-                " ".repeat(tabbing),
-                &self.name.bold(),
-                "@".dimmed(),
-                &self.version.yellow(),
-                ":".dimmed(),
-                fs.join(", ").red(),
-            );
-        } else {
-            println!(
-                "{}{:<mnl$} {} {:<mvl$}",
-                " ".repeat(tabbing),
-                &self.name.bold(),
-                "@".dimmed(),
-                &self.version.yellow()
-            );
-        }
-    }
-    fn to_cargo_str(&self) -> String {
-        match &self.features {
-            Some(fs) => format!(
-                "{} = {{ version = \"{}\", features = [{}] }}",
-                &self.name,
-                &self.version,
-                fs.iter()
-                    .map(|f| format!("\"{f}\""))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            None => format!("{} = \"{}\"", &self.name, &self.version),
+    fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize, dct: DColorType) {
+        match dct {
+            DColorType::WithoutColor => {
+                if let Some(fs) = &self.features {
+                    println!(
+                        "{}{:<mnl$} {} {:<mvl$} {} {}",
+                        " ".repeat(tabbing),
+                        &self.name.bold(),
+                        "@".dimmed(),
+                        &self.version,
+                        ":".dimmed(),
+                        fs.join(", "),
+                    );
+                } else {
+                    println!(
+                        "{}{:<mnl$} {} {:<mvl$}",
+                        " ".repeat(tabbing),
+                        &self.name,
+                        "@".dimmed(),
+                        &self.version
+                    );
+                }
+            }
+            DColorType::GOIDA => {
+                if let Some(fs) = &self.features {
+                    println!(
+                        "{}{:<mnl$} {} {:<mvl$} {} {}",
+                        " ".repeat(tabbing),
+                        &self.name.bold(),
+                        "@".dimmed(),
+                        &self.version.blue(),
+                        ":".dimmed(),
+                        fs.join(", ").red(),
+                    );
+                } else {
+                    println!(
+                        "{}{:<mnl$} {} {:<mvl$}",
+                        " ".repeat(tabbing),
+                        &self.name.bold(),
+                        "@".dimmed(),
+                        &self.version.blue()
+                    );
+                }
+            }
+            DColorType::Osetia => {
+                if let Some(fs) = &self.features {
+                    println!(
+                        "{}{:<mnl$} {} {:<mvl$} {} {}",
+                        " ".repeat(tabbing),
+                        &self.name.bold(),
+                        "@".dimmed(),
+                        &self.version.yellow(),
+                        ":".dimmed(),
+                        fs.join(", ").red(),
+                    );
+                } else {
+                    println!(
+                        "{}{:<mnl$} {} {:<mvl$}",
+                        " ".repeat(tabbing),
+                        &self.name.bold(),
+                        "@".dimmed(),
+                        &self.version.yellow()
+                    );
+                }
+            }
         }
     }
     fn from_toml<S: AsRef<str>>(name: S, attrs: TValue) -> Result<Self> {
