@@ -70,8 +70,8 @@ enum DepiCommand {
         /// Dependencies string in format: <name>@<version>:<features>!<target>
         /// Multiple dependencies separated by '/'
         /// Example: serde@1.0:derive,json/anyhow@1.0!dev
-        #[clap(short = 'D', long, required = true)]
-        deps: String,
+        #[clap(short = 'D', long)]
+        deps: Option<String>,
 
         /// Enable verbose output
         #[clap(short, long)]
@@ -86,8 +86,8 @@ enum DepiCommand {
         /// Dependencies string in format: <name>@<version>:<features>!<target>
         /// Multiple dependencies separated by '/'
         /// Example: serde@1.0:derive,json/anyhow@1.0!dev
-        #[clap(short = 'D', long, required = true)]
-        deps: String,
+        #[clap(short = 'D', long)]
+        deps: Option<String>,
 
         /// Enable verbose output
         #[clap(short, long)]
@@ -240,77 +240,113 @@ impl Cargo {
         println!("{}", "=".repeat(40).cyan());
         Ok(())
     }
-    async fn init_project<S: AsRef<str>>(deps: S, verbose: bool) -> Result<String> {
+    async fn init_project<S: AsRef<str>>(
+        name: Option<S>,
+        deps: Option<S>,
+        verbose: bool,
+    ) -> Result<String> {
         println!("{}", "INIT".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
         let mut newc = Table::new();
 
         let mut project = Table::new();
-        let project_name = fs::canonicalize(env::current_dir().unwrap_or(".".into()))?
-            .file_name()
-            .ok_or(anyhow!("failed file_name()"))?
-            .to_str()
-            .ok_or(anyhow!("failed to_str()"))?
-            .to_string();
+        let project_name = if let Some(name) = name {
+            let name = name.as_ref().to_string();
+            name
+        } else {
+            fs::canonicalize(env::current_dir().unwrap_or(".".into()))?
+                .file_name()
+                .ok_or(anyhow!("failed file_name()"))?
+                .to_str()
+                .ok_or(anyhow!("failed to_str()"))?
+                .to_string()
+        };
+
         project.insert("name".to_string(), TValue::String(project_name));
         project.insert("version".to_string(), TValue::String("0.1.0".to_string()));
         project.insert("edition".to_string(), TValue::String("2024".to_string()));
 
         newc.insert("project".to_string(), TValue::Table(project));
 
-        let pdeps = parse_deps(deps)?;
-        let mut fdeps = Vec::new();
-        for pd in &pdeps {
-            fdeps.push(fetch_crates_dep(&pd.name));
-        }
-
-        let fdl = fdeps.len();
-        let fdeps = (future::join_all(fdeps).await)
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-
-        if fdl != fdeps.len() {
-            return Err(anyhow!("error with fetching some deps"));
-        }
-
-        let mut hmdeps = HashMap::new();
-
-        let mut mnl = 0;
-        let mut mvl = 0;
-
-        for i in 0..fdl {
-            let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
-            if mnl < d.name.len() {
-                mnl = d.name.len();
-            }
-            if mvl < d.version.len() {
-                mvl = d.version.len();
-            }
-            hmdeps
-                .entry(DType::from(&pdeps[i].target))
-                .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
-                .or_insert(vec![d]);
-        }
-
-        for (t, ds) in hmdeps {
-            println!("{}", t.to_cargo_field().bold().green());
-
-            let mut tdeps = Table::new();
-            for d in ds {
-                d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
-                let (name, attrs) = d.to_toml();
-                tdeps.insert(name, attrs);
+        if let Some(deps) = deps {
+            let deps = deps.as_ref();
+            let pdeps = parse_deps(deps)?;
+            let mut fdeps = Vec::new();
+            for pd in &pdeps {
+                fdeps.push(fetch_crates_dep(&pd.name));
             }
 
-            newc.insert(t.to_cargo_field(), TValue::Table(tdeps));
+            let fdl = fdeps.len();
+            let fdeps = (future::join_all(fdeps).await)
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+
+            if fdl != fdeps.len() {
+                return Err(anyhow!("error with fetching some deps"));
+            }
+
+            let mut hmdeps = HashMap::new();
+
+            let mut mnl = 0;
+            let mut mvl = 0;
+
+            for i in 0..fdl {
+                let d = get_normal_dep(&pdeps[i], &fdeps[i])?;
+                if mnl < d.name.len() {
+                    mnl = d.name.len();
+                }
+                if mvl < d.version.len() {
+                    mvl = d.version.len();
+                }
+                hmdeps
+                    .entry(DType::from(&pdeps[i].target))
+                    .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
+                    .or_insert(vec![d]);
+            }
+
+            for (t, ds) in hmdeps {
+                println!("{}", t.to_cargo_field().bold().green());
+
+                let mut tdeps = Table::new();
+                for d in ds {
+                    d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
+                    let (name, attrs) = d.to_toml();
+                    tdeps.insert(name, attrs);
+                }
+
+                newc.insert(t.to_cargo_field(), TValue::Table(tdeps));
+            }
         }
 
         println!("{}", "=".repeat(40).cyan());
 
         Ok(toml::to_string(&newc)?)
     }
+    // async fn init_project_deps<S: AsRef<str>>(deps: S, verbose: bool) -> Result<String> {
+    //     println!("{}", "INIT".bold().on_cyan());
+    //     println!("{}", "=".repeat(40).cyan());
+    //
+    //     let mut newc = Table::new();
+    //
+    //     let mut project = Table::new();
+    //     let project_name = fs::canonicalize(env::current_dir().unwrap_or(".".into()))?
+    //         .file_name()
+    //         .ok_or(anyhow!("failed file_name()"))?
+    //         .to_str()
+    //         .ok_or(anyhow!("failed to_str()"))?
+    //         .to_string();
+    //     project.insert("name".to_string(), TValue::String(project_name));
+    //     project.insert("version".to_string(), TValue::String("0.1.0".to_string()));
+    //     project.insert("edition".to_string(), TValue::String("2024".to_string()));
+    //
+    //     newc.insert("project".to_string(), TValue::Table(project));
+    //
+    //     println!("{}", "=".repeat(40).cyan());
+    //
+    //     Ok(toml::to_string(&newc)?)
+    // }
     async fn append_deps<S: AsRef<str>>(&self, deps: S, verbose: bool) -> Result<()> {
         println!("{}", "DEP(S) ADD".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
@@ -926,7 +962,7 @@ async fn main() -> Result<()> {
     match com {
         DepiCommand::Init { deps, verbose } => {
             // let cp = Cargo::from_cur()?;
-            let cs = Cargo::init_project(deps, verbose).await?;
+            let cs = Cargo::init_project(None, deps.as_deref(), verbose).await?;
 
             let mut f = fs::File::create("Cargo.toml")?;
             f.write_all(cs.as_bytes())?;
@@ -943,7 +979,7 @@ async fn main() -> Result<()> {
             deps,
             verbose,
         } => {
-            let cs = Cargo::init_project(deps, verbose).await?;
+            let cs = Cargo::init_project(Some(name.as_ref()), deps.as_deref(), verbose).await?;
 
             let name = PathBuf::from(name);
             fs::create_dir(&name)?;

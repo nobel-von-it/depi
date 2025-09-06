@@ -1,6 +1,6 @@
 CARGO_BIN ?= $(HOME)/.cargo/bin
 
-all: test build
+all: build
 
 build:
 	cargo build --release
