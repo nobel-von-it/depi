@@ -62,6 +62,36 @@ impl ToString for DType {
     }
 }
 
+#[derive(Debug, Clone)]
+enum ColorType {
+    One(DColor),
+    Random,
+}
+
+impl ColorType {
+    fn get_dcolor(&self) -> DColor {
+        match self {
+            Self::One(dc) => *dc,
+            Self::Random => DColor::get_random(),
+        }
+    }
+}
+
+impl Default for ColorType {
+    fn default() -> Self {
+        Self::One(DColor::default())
+    }
+}
+
+impl<S: AsRef<str>> From<S> for ColorType {
+    fn from(s: S) -> Self {
+        match s.as_ref().to_lowercase().as_str() {
+            "rand" | "random" => Self::Random,
+            _ => Self::One(DColor::from(s)),
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[clap(about = "DEPendency Initialization manager", version)]
 enum DepiCommand {
@@ -121,6 +151,8 @@ enum DepiCommand {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
+        #[clap(short, long)]
+        color: ColorType,
     },
     /// Update dependencies to latest versions
     Update {
@@ -311,7 +343,7 @@ impl Cargo {
 
                 let mut tdeps = Table::new();
                 for d in ds {
-                    d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
+                    d.print_pretty(mnl, mvl, 2, DColor::Osetia);
                     let (name, attrs) = d.to_toml();
                     tdeps.insert(name, attrs);
                 }
@@ -396,7 +428,7 @@ impl Cargo {
             match content.get_mut(&t.to_cargo_field()) {
                 Some(TValue::Table(deps)) => {
                     for d in ds {
-                        d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
+                        d.print_pretty(mnl, mvl, 2, DColor::Osetia);
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -405,7 +437,7 @@ impl Cargo {
                 None => {
                     let mut deps = Table::new();
                     for d in ds {
-                        d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
+                        d.print_pretty(mnl, mvl, 2, DColor::Osetia);
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -464,7 +496,7 @@ impl Cargo {
 
                 println!("{}", dtcf.bold().red());
                 for d in removed_deps {
-                    d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
+                    d.print_pretty(mnl, mvl, 2, DColor::Osetia);
                 }
                 deps.retain(|k, _| !names.contains(&k));
                 if deps.is_empty() {
@@ -484,7 +516,7 @@ impl Cargo {
             .flatten()
             .collect()
     }
-    async fn list(&self, verbose: bool) -> Result<()> {
+    async fn list(&self, verbose: bool, ct: ColorType) -> Result<()> {
         println!("{}", "DEPS LIST".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -518,7 +550,7 @@ impl Cargo {
         for (t, ds) in hmdeps {
             println!("{}", t.to_cargo_field().bold().green());
             for d in ds {
-                d.print_pretty(mnl, mvl, 2, DColorType::Osetia);
+                d.print_pretty(mnl, mvl, 2, ct.get_dcolor());
             }
         }
 
@@ -766,12 +798,32 @@ fn parse_dep<S: AsRef<str>>(s: S) -> Result<PDep> {
     })
 }
 
-#[derive(Default, Clone, Copy)]
-enum DColorType {
+#[derive(Default, Clone, Copy, Debug)]
+enum DColor {
     #[default]
     WithoutColor,
     GOIDA,
     Osetia,
+}
+
+impl DColor {
+    fn get_random() -> Self {
+        match rand::random_range(0..2) {
+            0 => Self::GOIDA,
+            1 => Self::Osetia,
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<S: AsRef<str>> From<S> for DColor {
+    fn from(s: S) -> Self {
+        match s.as_ref().to_lowercase().as_str() {
+            "rus" | "goool" | "goida" => Self::GOIDA,
+            "osetia" | "auto" => Self::Osetia,
+            _ => Self::WithoutColor,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -782,9 +834,9 @@ struct Dep {
 }
 
 impl Dep {
-    fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize, dct: DColorType) {
+    fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize, dct: DColor) {
         match dct {
-            DColorType::WithoutColor => {
+            DColor::WithoutColor => {
                 if let Some(fs) = &self.features {
                     println!(
                         "{}{:<mnl$} {} {:<mvl$} {} {}",
@@ -805,7 +857,7 @@ impl Dep {
                     );
                 }
             }
-            DColorType::GOIDA => {
+            DColor::GOIDA => {
                 if let Some(fs) = &self.features {
                     println!(
                         "{}{:<mnl$} {} {:<mvl$} {} {}",
@@ -826,7 +878,7 @@ impl Dep {
                     );
                 }
             }
-            DColorType::Osetia => {
+            DColor::Osetia => {
                 if let Some(fs) = &self.features {
                     println!(
                         "{}{:<mnl$} {} {:<mvl$} {} {}",
@@ -1011,9 +1063,9 @@ async fn main() -> Result<()> {
             let cp = Cargo::from_cur()?;
             cp.update_deps(verbose).await?;
         }
-        DepiCommand::List { verbose } => {
+        DepiCommand::List { verbose, color } => {
             let cp = Cargo::from_cur()?;
-            cp.list(verbose).await?;
+            cp.list(verbose, color).await?;
         }
     }
 
