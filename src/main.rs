@@ -151,7 +151,7 @@ enum DepiCommand {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
-        #[clap(short, long)]
+        #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
     /// Update dependencies to latest versions
