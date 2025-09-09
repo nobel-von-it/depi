@@ -106,6 +106,8 @@ enum DepiCommand {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
+        #[clap(short, long, default_value = "osetia")]
+        color: ColorType,
     },
     /// Create a new project in provided directory with provided dependencies
     New {
@@ -122,6 +124,8 @@ enum DepiCommand {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
+        #[clap(short, long, default_value = "osetia")]
+        color: ColorType,
     },
     /// Add new dependencies to existing project
     Add {
@@ -134,6 +138,8 @@ enum DepiCommand {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
+        #[clap(short, long, default_value = "osetia")]
+        color: ColorType,
     },
     /// Remove dependencies from existing project
     Remove {
@@ -145,13 +151,15 @@ enum DepiCommand {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
+        #[clap(short, long, default_value = "osetia")]
+        color: ColorType,
     },
     /// List all current dependencies
     List {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
-        #[clap(short, long)]
+        #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
     /// Update dependencies to latest versions
@@ -159,6 +167,8 @@ enum DepiCommand {
         /// Enable verbose output
         #[clap(short, long)]
         verbose: bool,
+        #[clap(short, long, default_value = "osetia")]
+        color: ColorType,
     },
 }
 
@@ -176,7 +186,7 @@ impl Cargo {
 
         Ok((fds, vds))
     }
-    async fn update_deps(&self, verbose: bool) -> Result<()> {
+    async fn update_deps(&self, verbose: bool, ct: ColorType) -> Result<()> {
         println!("{}", "DEPS UP".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -255,6 +265,7 @@ impl Cargo {
                 }
                 for i in 0..uds.len() {
                     if uds[i].version > vds[i] {
+                        uds[i].print_updated(&vds[i], mnl, mvl, 2, ct.get_dcolor());
                         println!(
                             "  {:<mnl$} {:<mvl$} {} {}",
                             uds[i].name.bold(),
@@ -276,6 +287,7 @@ impl Cargo {
         name: Option<S>,
         deps: Option<S>,
         verbose: bool,
+        ct: ColorType,
     ) -> Result<String> {
         println!("{}", "INIT".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
@@ -343,7 +355,7 @@ impl Cargo {
 
                 let mut tdeps = Table::new();
                 for d in ds {
-                    d.print_pretty(mnl, mvl, 2, DColor::Osetia);
+                    d.print_pretty(mnl, mvl, 2, ct.get_dcolor());
                     let (name, attrs) = d.to_toml();
                     tdeps.insert(name, attrs);
                 }
@@ -379,7 +391,12 @@ impl Cargo {
     //
     //     Ok(toml::to_string(&newc)?)
     // }
-    async fn append_deps<S: AsRef<str>>(&self, deps: S, verbose: bool) -> Result<()> {
+    async fn append_deps<S: AsRef<str>>(
+        &self,
+        deps: S,
+        verbose: bool,
+        ct: ColorType,
+    ) -> Result<()> {
         println!("{}", "DEP(S) ADD".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -428,7 +445,7 @@ impl Cargo {
             match content.get_mut(&t.to_cargo_field()) {
                 Some(TValue::Table(deps)) => {
                     for d in ds {
-                        d.print_pretty(mnl, mvl, 2, DColor::Osetia);
+                        d.print_pretty(mnl, mvl, 2, ct.get_dcolor());
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -437,7 +454,7 @@ impl Cargo {
                 None => {
                     let mut deps = Table::new();
                     for d in ds {
-                        d.print_pretty(mnl, mvl, 2, DColor::Osetia);
+                        d.print_pretty(mnl, mvl, 2, ct.get_dcolor());
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -452,7 +469,12 @@ impl Cargo {
 
         Ok(())
     }
-    async fn remove_deps<S: AsRef<str>>(&self, names: S, verbose: bool) -> Result<()> {
+    async fn remove_deps<S: AsRef<str>>(
+        &self,
+        names: S,
+        verbose: bool,
+        ct: ColorType,
+    ) -> Result<()> {
         println!("{}", "DEP(S) REM".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -496,7 +518,7 @@ impl Cargo {
 
                 println!("{}", dtcf.bold().red());
                 for d in removed_deps {
-                    d.print_pretty(mnl, mvl, 2, DColor::Osetia);
+                    d.print_pretty(mnl, mvl, 2, ct.get_dcolor());
                 }
                 deps.retain(|k, _| !names.contains(&k));
                 if deps.is_empty() {
@@ -834,6 +856,47 @@ struct Dep {
 }
 
 impl Dep {
+    fn print_updated<S: AsRef<str>>(
+        &self,
+        oldv: S,
+        mnl: usize,
+        mvl: usize,
+        tabbing: usize,
+        dct: DColor,
+    ) {
+        match dct {
+            DColor::WithoutColor => {
+                println!(
+                    "{}{:<mnl$} {:<mvl$} {} {}",
+                    " ".repeat(tabbing),
+                    self.name.bold(),
+                    oldv.as_ref(),
+                    "->".dimmed(),
+                    self.version.bold()
+                )
+            }
+            DColor::GOIDA => {
+                println!(
+                    "{}{:<mnl$} {:<mvl$} {} {}",
+                    " ".repeat(tabbing),
+                    self.name.bold(),
+                    oldv.as_ref().blue(),
+                    "->".dimmed(),
+                    self.version.bold().red()
+                )
+            }
+            DColor::Osetia => {
+                println!(
+                    "{}{:<mnl$} {:<mvl$} {} {}",
+                    " ".repeat(tabbing),
+                    self.name.bold(),
+                    oldv.as_ref().yellow(),
+                    "->".dimmed(),
+                    self.version.bold().red()
+                )
+            }
+        }
+    }
     fn print_pretty(&self, mnl: usize, mvl: usize, tabbing: usize, dct: DColor) {
         match dct {
             DColor::WithoutColor => {
@@ -1012,9 +1075,13 @@ fn get_normal_dep(pdep: &PDep, fdep: &CratesDep) -> Result<Dep> {
 async fn main() -> Result<()> {
     let com = DepiCommand::parse();
     match com {
-        DepiCommand::Init { deps, verbose } => {
+        DepiCommand::Init {
+            deps,
+            verbose,
+            color,
+        } => {
             // let cp = Cargo::from_cur()?;
-            let cs = Cargo::init_project(None, deps.as_deref(), verbose).await?;
+            let cs = Cargo::init_project(None, deps.as_deref(), verbose, color).await?;
 
             let mut f = fs::File::create("Cargo.toml")?;
             f.write_all(cs.as_bytes())?;
@@ -1030,8 +1097,10 @@ async fn main() -> Result<()> {
             name,
             deps,
             verbose,
+            color,
         } => {
-            let cs = Cargo::init_project(Some(name.as_ref()), deps.as_deref(), verbose).await?;
+            let cs =
+                Cargo::init_project(Some(name.as_ref()), deps.as_deref(), verbose, color).await?;
 
             let name = PathBuf::from(name);
             fs::create_dir(&name)?;
@@ -1051,17 +1120,25 @@ async fn main() -> Result<()> {
                 .stdout;
             println!("{}", String::from_utf8(gout)?.bold());
         }
-        DepiCommand::Add { deps, verbose } => {
+        DepiCommand::Add {
+            deps,
+            verbose,
+            color,
+        } => {
             let cp = Cargo::from_cur()?;
-            cp.append_deps(deps, verbose).await?;
+            cp.append_deps(deps, verbose, color).await?;
         }
-        DepiCommand::Remove { names, verbose } => {
+        DepiCommand::Remove {
+            names,
+            verbose,
+            color,
+        } => {
             let cp = Cargo::from_cur()?;
-            cp.remove_deps(names, verbose).await?;
+            cp.remove_deps(names, verbose, color).await?;
         }
-        DepiCommand::Update { verbose } => {
+        DepiCommand::Update { verbose, color } => {
             let cp = Cargo::from_cur()?;
-            cp.update_deps(verbose).await?;
+            cp.update_deps(verbose, color).await?;
         }
         DepiCommand::List { verbose, color } => {
             let cp = Cargo::from_cur()?;
