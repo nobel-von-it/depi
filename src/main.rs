@@ -311,7 +311,7 @@ impl Cargo {
         project.insert("version".to_string(), TValue::String("0.1.0".to_string()));
         project.insert("edition".to_string(), TValue::String("2024".to_string()));
 
-        newc.insert("project".to_string(), TValue::Table(project));
+        newc.insert("package".to_string(), TValue::Table(project));
 
         if let Some(deps) = deps {
             let deps = deps.as_ref();
