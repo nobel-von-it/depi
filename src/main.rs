@@ -826,13 +826,15 @@ enum DColor {
     WithoutColor,
     GOIDA,
     Osetia,
+    Poland,
 }
 
 impl DColor {
     fn get_random() -> Self {
-        match rand::random_range(0..2) {
+        match rand::random_range(0..3) {
             0 => Self::GOIDA,
             1 => Self::Osetia,
+            2 => Self::Poland,
             _ => unreachable!(),
         }
     }
@@ -843,6 +845,7 @@ impl<S: AsRef<str>> From<S> for DColor {
         match s.as_ref().to_lowercase().as_str() {
             "rus" | "goool" | "goida" => Self::GOIDA,
             "osetia" | "auto" => Self::Osetia,
+            "poland" => Self::Poland,
             _ => Self::WithoutColor,
         }
     }
@@ -891,6 +894,23 @@ impl Dep {
                     " ".repeat(tabbing),
                     self.name.bold(),
                     oldv.as_ref().yellow(),
+                    "->".dimmed(),
+                    self.version.bold().red()
+                )
+            }
+            DColor::Poland => {
+                let oldv = oldv.as_ref();
+                let oll = oldv.len() / 2;
+                let oldvl = &oldv[0..oll];
+                let oldvr = &oldv[oll..oldv.len()];
+
+                let nmvl = mvl - oldvl.len();
+                println!(
+                    "{}{:<mnl$} {}{:<nmvl} {} {}",
+                    " ".repeat(tabbing),
+                    self.name.bold(),
+                    oldvl,
+                    oldvr.red(),
                     "->".dimmed(),
                     self.version.bold().red()
                 )
@@ -959,6 +979,34 @@ impl Dep {
                         &self.name.bold(),
                         "@".dimmed(),
                         &self.version.yellow()
+                    );
+                }
+            }
+            DColor::Poland => {
+                if let Some(fs) = &self.features {
+                    let dvr = &self.version;
+                    let dvh = dvr.len() / 2;
+                    let dvrl = &dvr[0..dvh];
+                    let dvrr = &dvr[dvh..dvr.len()];
+
+                    let nmvl = mvl - dvrl.len();
+                    println!(
+                        "{}{:<mnl$} {} {}{:<nmvl$} {} {}",
+                        " ".repeat(tabbing),
+                        &self.name.bold(),
+                        "@".dimmed(),
+                        dvrl,
+                        dvrr.red(),
+                        ":".dimmed(),
+                        fs.join(", ").red(),
+                    );
+                } else {
+                    println!(
+                        "{}{:<mnl$} {} {:<mvl$}",
+                        " ".repeat(tabbing),
+                        &self.name.bold(),
+                        "@".dimmed(),
+                        &self.version.red()
                     );
                 }
             }
