@@ -18,6 +18,16 @@ fn main() {
 }
 "#;
 
+fn pinfo<S: AsRef<str>>(s: S) {
+    println!("{}: {}", "INFO".dimmed(), s.as_ref())
+}
+async fn perror<S: AsRef<str>>(s: S) {
+    println!("{}: {}", "ERROR".red(), s.as_ref())
+}
+async fn pwarn<S: AsRef<str>>(s: S) {
+    println!("{}: {}", "WARN".yellow(), s.as_ref())
+}
+
 #[derive(Hash, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum DType {
     Normal,
@@ -178,10 +188,17 @@ impl Cargo {
     fn update_dep_type(deps: &Table, verbose: bool) -> Result<(Vec<Dep>, Vec<String>)> {
         let mut fds = Vec::new();
         let mut vds = Vec::new();
+        if verbose {
+            pinfo("init feature and old version vector");
+        }
+
         for (k, v) in deps {
             let d = Dep::from_toml(k, v.clone())?;
             vds.push(d.version.clone());
             fds.push(d);
+        }
+        if verbose {
+            pinfo(format!("prepared {} deps to update", fds.len()));
         }
 
         Ok((fds, vds))
@@ -190,13 +207,23 @@ impl Cargo {
         println!("{}", "DEPS UP".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
+        if verbose {
+            pinfo("parsing Cargo.toml file...");
+        }
         let content = fs::read_to_string(&self.0)?;
         let mut content = content.parse::<Table>()?;
+        if verbose {
+            pinfo("parsed successfully");
+        }
+
         let mut futures = Vec::new();
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
             if let Some(TValue::Table(deps)) = content.get(dtcf.as_str()) {
+                if verbose {
+                    pinfo(format!("fetching {} field", &dtcf));
+                }
                 futures.push(async move {
                     let (fds, vds) = Self::update_dep_type(&deps, verbose)?;
                     let ufds = fds
@@ -212,15 +239,25 @@ impl Cargo {
                 });
             }
         }
+        if verbose {
+            pinfo(format!("started {} update futures", futures.len()));
+        }
 
         let frs = (future::join_all(futures).await)
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
 
+        if verbose {
+            pinfo(format!("awaited {} futures", frs.len()));
+        }
+
         let mut mnl = 0;
         let mut mvl = 0;
 
+        if verbose {
+            pinfo("perform max name and version");
+        }
         for fr in &frs {
             let (_, uds, _) = fr;
 
@@ -233,19 +270,26 @@ impl Cargo {
                 }
             }
         }
+        if verbose {
+            pinfo(format!("got {}/{}", mnl, mvl));
+        }
 
+        let mut real_updated = 0;
         for fr in frs {
             let (dtype, uds, vds) = fr;
 
             let dtcf = dtype.to_cargo_field();
 
             if let Some(TValue::Table(deps)) = content.get_mut(&dtcf) {
+                if verbose {
+                    pinfo(format!("updating {} field", &dtcf));
+                }
                 let mut ndeps = Table::new();
                 for ud in &uds {
                     let (name, attrs) = ud.to_toml();
                     ndeps.insert(name, attrs);
                 }
-                *deps = ndeps
+                *deps = ndeps;
             }
 
             let mut changed = 0;
@@ -254,8 +298,12 @@ impl Cargo {
                     changed += 1;
                 }
             }
+            if verbose {
+                pinfo(format!("updated {} deps in {}", changed, &dtcf));
+            }
 
             if changed > 0 {
+                real_updated += 1;
                 println!("{}", dtype.to_cargo_field().green());
                 if uds.len() != vds.len() {
                     return Err(anyhow!(
@@ -278,7 +326,16 @@ impl Cargo {
             }
         }
 
-        fs::write(&self.0, toml::to_string(&content)?)?;
+        if verbose {
+            pinfo(format!("real update {} fields", real_updated));
+            pinfo("skip saving");
+        }
+        if real_updated > 0 {
+            if verbose {
+                pinfo("saving changes...");
+            }
+            fs::write(&self.0, toml::to_string(&content)?)?;
+        }
 
         println!("{}", "=".repeat(40).cyan());
         Ok(())
@@ -539,6 +596,7 @@ impl Cargo {
             .collect()
     }
     async fn list(&self, verbose: bool, ct: ColorType) -> Result<()> {
+        if verbose {}
         println!("{}", "DEPS LIST".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -906,7 +964,7 @@ impl Dep {
 
                 let nmvl = mvl - oldvl.len();
                 println!(
-                    "{}{:<mnl$} {}{:<nmvl} {} {}",
+                    "{}{:<mnl$} {}{:<nmvl$} {} {}",
                     " ".repeat(tabbing),
                     self.name.bold(),
                     oldvl,
