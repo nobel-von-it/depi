@@ -1,7 +1,8 @@
-use anyhow::{Error, Result, anyhow};
-use clap::{Parser, Subcommand};
+use anyhow::{Result, anyhow};
+use clap::Parser;
 use colored::*;
 use futures::future;
+use log::info;
 use serde_json::{Value as JValue, from_str};
 use toml::{Table, Value as TValue, value::Array};
 
@@ -17,16 +18,6 @@ fn main() {
     println!("Hello Depi!");
 }
 "#;
-
-fn pinfo<S: AsRef<str>>(s: S) {
-    println!("{}: {}", "INFO".dimmed(), s.as_ref())
-}
-async fn perror<S: AsRef<str>>(s: S) {
-    println!("{}: {}", "ERROR".red(), s.as_ref())
-}
-async fn pwarn<S: AsRef<str>>(s: S) {
-    println!("{}: {}", "WARN".yellow(), s.as_ref())
-}
 
 #[derive(Hash, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum DType {
@@ -113,9 +104,6 @@ enum DepiCommand {
         #[clap(short = 'D', long)]
         deps: Option<String>,
 
-        /// Enable verbose output
-        #[clap(short, long)]
-        verbose: bool,
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
@@ -131,9 +119,6 @@ enum DepiCommand {
         #[clap(short = 'D', long)]
         deps: Option<String>,
 
-        /// Enable verbose output
-        #[clap(short, long)]
-        verbose: bool,
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
@@ -145,9 +130,6 @@ enum DepiCommand {
         #[clap(required = true)]
         deps: String,
 
-        /// Enable verbose output
-        #[clap(short, long)]
-        verbose: bool,
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
@@ -158,25 +140,16 @@ enum DepiCommand {
         #[clap(required = true)]
         names: String,
 
-        /// Enable verbose output
-        #[clap(short, long)]
-        verbose: bool,
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
     /// List all current dependencies
     List {
-        /// Enable verbose output
-        #[clap(short, long)]
-        verbose: bool,
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
     /// Update dependencies to latest versions
     Update {
-        /// Enable verbose output
-        #[clap(short, long)]
-        verbose: bool,
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
@@ -185,47 +158,35 @@ enum DepiCommand {
 struct Cargo(PathBuf);
 
 impl Cargo {
-    fn update_dep_type(deps: &Table, verbose: bool) -> Result<(Vec<Dep>, Vec<String>)> {
+    fn update_dep_type(deps: &Table) -> Result<(Vec<Dep>, Vec<String>)> {
         let mut fds = Vec::new();
         let mut vds = Vec::new();
-        if verbose {
-            pinfo("init feature and old version vector");
-        }
-
+        info!("init feature and and old version vector");
         for (k, v) in deps {
             let d = Dep::from_toml(k, v.clone())?;
             vds.push(d.version.clone());
             fds.push(d);
         }
-        if verbose {
-            pinfo(format!("prepared {} deps to update", fds.len()));
-        }
-
+        info!("prepared {} deps to update", fds.len());
         Ok((fds, vds))
     }
-    async fn update_deps(&self, verbose: bool, ct: ColorType) -> Result<()> {
+    async fn update_deps(&self, ct: ColorType) -> Result<()> {
         println!("{}", "DEPS UP".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
-        if verbose {
-            pinfo("parsing Cargo.toml file...");
-        }
+        info!("parsing Cargo.toml file...");
         let content = fs::read_to_string(&self.0)?;
         let mut content = content.parse::<Table>()?;
-        if verbose {
-            pinfo("parsed successfully");
-        }
+        info!("parsed successfully");
 
         let mut futures = Vec::new();
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
             if let Some(TValue::Table(deps)) = content.get(dtcf.as_str()) {
-                if verbose {
-                    pinfo(format!("fetching {} field", &dtcf));
-                }
+                info!("fetching {} field", &dtcf);
                 futures.push(async move {
-                    let (fds, vds) = Self::update_dep_type(&deps, verbose)?;
+                    let (fds, vds) = Self::update_dep_type(&deps)?;
                     let ufds = fds
                         .into_iter()
                         .map(|d| d.update_version())
@@ -239,25 +200,17 @@ impl Cargo {
                 });
             }
         }
-        if verbose {
-            pinfo(format!("started {} update futures", futures.len()));
-        }
-
+        info!("started {} update futures", futures.len());
         let frs = (future::join_all(futures).await)
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
-
-        if verbose {
-            pinfo(format!("awaited {} futures", frs.len()));
-        }
+        info!("awaited {} futures", frs.len());
 
         let mut mnl = 0;
         let mut mvl = 0;
 
-        if verbose {
-            pinfo("perform max name and version");
-        }
+        info!("perform max name and version");
         for fr in &frs {
             let (_, uds, _) = fr;
 
@@ -270,9 +223,7 @@ impl Cargo {
                 }
             }
         }
-        if verbose {
-            pinfo(format!("got {}/{}", mnl, mvl));
-        }
+        info!("got {}/{}", mnl, mvl);
 
         let mut real_updated = 0;
         for fr in frs {
@@ -281,9 +232,7 @@ impl Cargo {
             let dtcf = dtype.to_cargo_field();
 
             if let Some(TValue::Table(deps)) = content.get_mut(&dtcf) {
-                if verbose {
-                    pinfo(format!("updating {} field", &dtcf));
-                }
+                info!("updating {} field", &dtcf);
                 let mut ndeps = Table::new();
                 for ud in &uds {
                     let (name, attrs) = ud.to_toml();
@@ -298,9 +247,7 @@ impl Cargo {
                     changed += 1;
                 }
             }
-            if verbose {
-                pinfo(format!("updated {} deps in {}", changed, &dtcf));
-            }
+            info!("updated {} deps in {}", changed, &dtcf);
 
             if changed > 0 {
                 real_updated += 1;
@@ -326,14 +273,10 @@ impl Cargo {
             }
         }
 
-        if verbose {
-            pinfo(format!("real update {} fields", real_updated));
-            pinfo("skip saving");
-        }
+        info!("real update {} fields", real_updated);
+        info!("skip saving");
         if real_updated > 0 {
-            if verbose {
-                pinfo("saving changes...");
-            }
+            info!("saving changes...");
             fs::write(&self.0, toml::to_string(&content)?)?;
         }
 
@@ -343,7 +286,6 @@ impl Cargo {
     async fn init_project<S: AsRef<str>>(
         name: Option<S>,
         deps: Option<S>,
-        verbose: bool,
         ct: ColorType,
     ) -> Result<String> {
         println!("{}", "INIT".bold().on_cyan());
@@ -425,35 +367,7 @@ impl Cargo {
 
         Ok(toml::to_string(&newc)?)
     }
-    // async fn init_project_deps<S: AsRef<str>>(deps: S, verbose: bool) -> Result<String> {
-    //     println!("{}", "INIT".bold().on_cyan());
-    //     println!("{}", "=".repeat(40).cyan());
-    //
-    //     let mut newc = Table::new();
-    //
-    //     let mut project = Table::new();
-    //     let project_name = fs::canonicalize(env::current_dir().unwrap_or(".".into()))?
-    //         .file_name()
-    //         .ok_or(anyhow!("failed file_name()"))?
-    //         .to_str()
-    //         .ok_or(anyhow!("failed to_str()"))?
-    //         .to_string();
-    //     project.insert("name".to_string(), TValue::String(project_name));
-    //     project.insert("version".to_string(), TValue::String("0.1.0".to_string()));
-    //     project.insert("edition".to_string(), TValue::String("2024".to_string()));
-    //
-    //     newc.insert("project".to_string(), TValue::Table(project));
-    //
-    //     println!("{}", "=".repeat(40).cyan());
-    //
-    //     Ok(toml::to_string(&newc)?)
-    // }
-    async fn append_deps<S: AsRef<str>>(
-        &self,
-        deps: S,
-        verbose: bool,
-        ct: ColorType,
-    ) -> Result<()> {
+    async fn append_deps<S: AsRef<str>>(&self, deps: S, ct: ColorType) -> Result<()> {
         println!("{}", "DEP(S) ADD".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -526,12 +440,7 @@ impl Cargo {
 
         Ok(())
     }
-    async fn remove_deps<S: AsRef<str>>(
-        &self,
-        names: S,
-        verbose: bool,
-        ct: ColorType,
-    ) -> Result<()> {
+    async fn remove_deps<S: AsRef<str>>(&self, names: S, ct: ColorType) -> Result<()> {
         println!("{}", "DEP(S) REM".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -595,8 +504,7 @@ impl Cargo {
             .flatten()
             .collect()
     }
-    async fn list(&self, verbose: bool, ct: ColorType) -> Result<()> {
-        if verbose {}
+    async fn list(&self, ct: ColorType) -> Result<()> {
         println!("{}", "DEPS LIST".bold().on_cyan());
         println!("{}", "=".repeat(40).cyan());
 
@@ -1179,15 +1087,13 @@ fn get_normal_dep(pdep: &PDep, fdep: &CratesDep) -> Result<Dep> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
+
     let com = DepiCommand::parse();
     match com {
-        DepiCommand::Init {
-            deps,
-            verbose,
-            color,
-        } => {
+        DepiCommand::Init { deps, color } => {
             // let cp = Cargo::from_cur()?;
-            let cs = Cargo::init_project(None, deps.as_deref(), verbose, color).await?;
+            let cs = Cargo::init_project(None, deps.as_deref(), color).await?;
 
             let mut f = fs::File::create("Cargo.toml")?;
             f.write_all(cs.as_bytes())?;
@@ -1199,14 +1105,8 @@ async fn main() -> Result<()> {
             let gout = process::Command::new("git").arg("init").output()?.stdout;
             println!("{}", String::from_utf8(gout)?.bold());
         }
-        DepiCommand::New {
-            name,
-            deps,
-            verbose,
-            color,
-        } => {
-            let cs =
-                Cargo::init_project(Some(name.as_ref()), deps.as_deref(), verbose, color).await?;
+        DepiCommand::New { name, deps, color } => {
+            let cs = Cargo::init_project(Some(name.as_ref()), deps.as_deref(), color).await?;
 
             let name = PathBuf::from(name);
             fs::create_dir(&name)?;
@@ -1226,29 +1126,21 @@ async fn main() -> Result<()> {
                 .stdout;
             println!("{}", String::from_utf8(gout)?.bold());
         }
-        DepiCommand::Add {
-            deps,
-            verbose,
-            color,
-        } => {
+        DepiCommand::Add { deps, color } => {
             let cp = Cargo::from_cur()?;
-            cp.append_deps(deps, verbose, color).await?;
+            cp.append_deps(deps, color).await?;
         }
-        DepiCommand::Remove {
-            names,
-            verbose,
-            color,
-        } => {
+        DepiCommand::Remove { names, color } => {
             let cp = Cargo::from_cur()?;
-            cp.remove_deps(names, verbose, color).await?;
+            cp.remove_deps(names, color).await?;
         }
-        DepiCommand::Update { verbose, color } => {
+        DepiCommand::Update { color } => {
             let cp = Cargo::from_cur()?;
-            cp.update_deps(verbose, color).await?;
+            cp.update_deps(color).await?;
         }
-        DepiCommand::List { verbose, color } => {
+        DepiCommand::List { color } => {
             let cp = Cargo::from_cur()?;
-            cp.list(verbose, color).await?;
+            cp.list(color).await?;
         }
     }
 

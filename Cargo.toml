@@ -1,23 +1,33 @@
-[package]
-name = "depi"
-version = "0.1.0"
-edition = "2024"
-authors = ["Nobel von IT"]
-description = "DEPendency Initialization manager"
-repository = "https://github.com/nobel-von-it/depi.git"
-license = "MIT"
-keywords = ["manager", "dependencies", "projects"]
-categories = ["command-line-utilities", "config"]
-
-
 [dependencies]
 anyhow = "1.0.99"
-clap = { version = "4.5.45", features = ["derive"] }
 colored = "3.0.0"
+env_logger = "0.11.8"
 futures = "0.3.31"
+log = "0.4.28"
 rand = "0.9.2"
 reqwest = "0.12.23"
-serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.143"
-tokio = { version = "1.47.1", features = ["rt", "macros", "rt-multi-thread"] }
 toml = "0.9.5"
+
+[dependencies.clap]
+features = ["derive"]
+version = "4.5.45"
+
+[dependencies.serde]
+features = ["derive"]
+version = "1.0.219"
+
+[dependencies.tokio]
+features = ["rt", "macros", "rt-multi-thread"]
+version = "1.47.1"
+
+[package]
+authors = ["Nobel von IT"]
+categories = ["command-line-utilities", "config"]
+description = "DEPendency Initialization manager"
+edition = "2024"
+keywords = ["manager", "dependencies", "projects"]
+license = "MIT"
+name = "depi"
+repository = "https://github.com/nobel-von-it/depi.git"
+version = "0.1.0"
