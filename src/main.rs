@@ -313,8 +313,7 @@ impl Cargo {
         newc.insert("package".to_string(), TValue::Table(project));
 
         if let Some(deps) = deps {
-            let deps = deps.as_ref();
-            let pdeps = parse_deps(deps)?;
+            let pdeps = parse_deps(deps.as_ref())?;
             let mut fdeps = Vec::new();
             for pd in &pdeps {
                 fdeps.push(fetch_crates_dep(&pd.name));
@@ -680,9 +679,51 @@ struct PDep {
     target: String,
 }
 
-fn parse_deps<S: AsRef<str>>(s: S) -> Result<Vec<PDep>> {
-    s.as_ref().trim().split("/").map(|d| parse_dep(d)).collect()
+enum DepsSnippet {
+    Axum,
 }
+
+impl<S: AsRef<str>> From<S> for DepsSnippet {
+    fn from(value: S) -> Self {
+        match value
+            .as_ref()
+            .strip_prefix(SNIPPET_PREFIX)
+            .unwrap_or_default()
+            .to_lowercase()
+            .as_str()
+        {
+            "axum" => Self::Axum,
+            _ => panic!("incorrect snippet"),
+        }
+    }
+}
+
+impl DepsSnippet {
+    fn get_deps(&self) -> Vec<Result<PDep>> {
+        match self {
+            Self::Axum => {
+                vec![parse_dep("tokio:full"), parse_dep("axum")]
+            }
+        }
+    }
+}
+
+const SNIPPET_PREFIX: &str = "s+";
+
+fn parse_deps<S: AsRef<str>>(s: S) -> Result<Vec<PDep>> {
+    let mut res = Vec::new();
+    for d in s.as_ref().trim().split("/") {
+        if d.starts_with(SNIPPET_PREFIX) {
+            for pd in DepsSnippet::from(d).get_deps() {
+                res.push(pd);
+            }
+        } else {
+            res.push(parse_dep(d));
+        }
+    }
+    res.into_iter().collect()
+}
+
 fn parse_dep<S: AsRef<str>>(s: S) -> Result<PDep> {
     enum DPState {
         Name,
