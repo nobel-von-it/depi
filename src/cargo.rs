@@ -9,6 +9,7 @@ use log::info;
 use toml::Table;
 use toml::Value as TValue;
 
+use crate::storage;
 use crate::{
     dep::{self, DType, Dep},
     utils::{self, ColorType},
@@ -174,7 +175,8 @@ impl Cargo {
         newc.insert("package".to_string(), TValue::Table(project));
 
         if let Some(deps) = deps {
-            let pdeps = dep::parse::parse_deps(deps.as_ref())?;
+            let a_s = storage::AliasStorage::load()?;
+            let pdeps = dep::parse::parse_deps(deps.as_ref(), a_s.list())?;
             let mut fdeps = Vec::new();
             for pd in &pdeps {
                 fdeps.push(dep::api::fetch_crates_dep(&pd.name));
@@ -234,7 +236,8 @@ impl Cargo {
         let content = fs::read_to_string(&self.0)?;
         let mut content = content.parse::<Table>()?;
 
-        let pdeps = dep::parse::parse_deps(deps)?;
+        let a_s = storage::AliasStorage::load()?;
+        let pdeps = dep::parse::parse_deps(deps.as_ref(), a_s.list())?;
         let mut fdeps = Vec::new();
         for pd in &pdeps {
             fdeps.push(dep::api::fetch_crates_dep(&pd.name));

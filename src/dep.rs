@@ -237,6 +237,8 @@ pub mod api {
 }
 
 pub mod parse {
+    use std::collections::HashMap;
+
     use anyhow::{Result, anyhow};
 
     #[derive(Debug, Clone)]
@@ -247,10 +249,16 @@ pub mod parse {
         pub target: String,
     }
 
-    pub fn parse_deps<S: AsRef<str>>(s: S) -> Result<Vec<PDep>> {
+    pub fn parse_deps<S: AsRef<str>>(s: S, aliases: &HashMap<String, String>) -> Result<Vec<PDep>> {
         let mut res = Vec::new();
         for d in s.as_ref().trim().split("/") {
-            res.push(parse_dep(d));
+            if let Some(alias_deps) = aliases.get(d) {
+                for ad in alias_deps.split("/") {
+                    res.push(parse_dep(ad));
+                }
+            } else {
+                res.push(parse_dep(d));
+            }
         }
         res.into_iter().collect()
     }
