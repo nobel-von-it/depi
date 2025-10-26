@@ -5,8 +5,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 
-use crate::cargo;
 use crate::utils::ColorType;
+use crate::{cargo, storage};
 
 const MAIN: &str = r#"
 fn main() {
@@ -64,7 +64,17 @@ enum DepiCommand {
 
 #[derive(Subcommand, Debug)]
 enum AliasCommand {
-    
+    Add {
+        #[clap(required = true)]
+        name: String,
+        #[clap(required = true)]
+        original: String,
+    },
+    Remove {
+        #[clap(required = true)]
+        name: String,
+    },
+    List,
 }
 
 pub async fn handle_command() -> Result<()> {
@@ -121,6 +131,36 @@ pub async fn handle_command() -> Result<()> {
         DepiCommand::List { color } => {
             let cp = cargo::Cargo::from_cur()?;
             cp.list(color).await?;
+        }
+        DepiCommand::Alias { command } => {
+            let mut a_s = storage::AliasStorage::load()?;
+            match command {
+                AliasCommand::Add { name, original } => match a_s.add(&name, &original) {
+                    Some(old) => {
+                        println!("{} was replased by {}", old, original)
+                    }
+                    None => {
+                        println!("added new alias")
+                    }
+                },
+                AliasCommand::Remove { name } => match a_s.rem(&name) {
+                    Some(removed) => {
+                        println!("{} ({}) was removed", name, removed)
+                    }
+                    None => {
+                        println!("{} not exist", name)
+                    }
+                },
+                AliasCommand::List => {
+                    let list = a_s.list();
+                    println!("ALIAS LIST (");
+                    for (k, v) in list {
+                        println!("  {} -> {},", k, v);
+                    }
+                    println!(");");
+                }
+            }
+            a_s.save()?;
         }
     }
     Ok(())
