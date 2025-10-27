@@ -74,13 +74,63 @@ pub mod funcs {
             .ok_or(anyhow!("failed to_str()"))?
             .to_string())
     }
+
+    pub(super) fn get_term_size() -> Option<(u16, u16)> {
+        use libc::{TIOCGWINSZ, ioctl};
+        use std::io;
+        use std::mem::MaybeUninit;
+        use std::os::fd::AsRawFd;
+
+        #[repr(C)]
+        struct Winsize {
+            ws_row: u16,
+            ws_col: u16,
+            ws_xpixel: u16,
+            ws_ypixel: u16,
+        }
+
+        let stdout = io::stdout();
+        let fd_stdout = stdout.as_raw_fd();
+
+        let mut size: MaybeUninit<Winsize> = MaybeUninit::uninit();
+
+        unsafe {
+            if ioctl(fd_stdout, TIOCGWINSZ, size.as_mut_ptr()) != -1 {
+                let size = size.assume_init();
+                Some((size.ws_col, size.ws_row))
+            } else {
+                None
+            }
+        }
+    }
 }
 
 pub mod style {
     use colored::Colorize;
+    use once_cell::sync::Lazy;
 
-    use crate::{dep::Dep, utils::DColor};
+    use crate::{
+        dep::{DType, Dep},
+        utils::DColor,
+    };
 
+    static TERMINAL_SIZE: Lazy<(u16, u16)> =
+        Lazy::new(|| super::funcs::get_term_size().unwrap_or((40, 20)));
+
+    pub fn print_start_msg<S: AsRef<str>>(name: S) {
+        println!("{}", name.as_ref().to_ascii_uppercase().bold().on_cyan());
+        println!("{}", "=".repeat(TERMINAL_SIZE.0 as usize).cyan());
+    }
+    pub fn print_end_msg() {
+        println!("{}", "=".repeat(TERMINAL_SIZE.0 as usize).cyan());
+    }
+
+    pub fn print_cargo_field(dtype: &DType) {
+        println!("{}", dtype.to_cargo_field().green())
+    }
+    pub fn print_cargo_field_a(dtype: &DType) {
+        println!("{}", dtype.to_cargo_field().red())
+    }
     pub fn print_colored_ref_dep_version_update<S: AsRef<str>>(
         dep: &Dep,
         oldv: S,
@@ -276,6 +326,7 @@ pub mod style {
 
 pub mod ver {
     use anyhow::{Result, anyhow};
+    use log::warn;
 
     #[derive(PartialOrd, Ord, PartialEq, Eq, Clone, Debug, Default)]
     pub struct OrdVersion(pub u32, pub u32, pub u32);
@@ -286,8 +337,10 @@ pub mod ver {
 
             let mut s = s.as_ref();
 
-            if let Some((_, right)) = s.split_once("-") {
-                return Err(anyhow!("version with suffix {right} is not supported"));
+            if let Some((left, right)) = s.split_once("-") {
+                s = left;
+                warn!("version with suffix {right} is not supported");
+                warn!("current version is {left}");
             }
             let start = s.chars().nth(0).unwrap();
             if !start.is_ascii_digit() {

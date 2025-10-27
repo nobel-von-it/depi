@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::path::Path;
 use std::{fs, path::PathBuf};
 
@@ -10,6 +11,7 @@ use toml::Table;
 use toml::Value as TValue;
 
 use crate::storage;
+use crate::utils::DColor;
 use crate::{
     dep::{self, DType, Dep},
     utils::{self, ColorType},
@@ -31,8 +33,7 @@ impl Cargo {
         Ok((fds, vds))
     }
     pub async fn update_deps(&self, ct: ColorType) -> Result<()> {
-        println!("{}", "DEPS UP".bold().on_cyan());
-        println!("{}", "=".repeat(40).cyan());
+        utils::style::print_start_msg("UPDATE DEP(S)");
 
         info!("parsing Cargo.toml file...");
         let content = fs::read_to_string(&self.0)?;
@@ -111,7 +112,7 @@ impl Cargo {
 
             if changed > 0 {
                 real_updated += 1;
-                println!("{}", dtype.to_cargo_field().green());
+                utils::style::print_cargo_field(&dtype);
                 if uds.len() != vds.len() {
                     return Err(anyhow!(
                         "damn error in fetching and updating deps: {}",
@@ -128,13 +129,6 @@ impl Cargo {
                             2,
                             ct.get_dcolor(),
                         );
-                        // println!(
-                        //     "  {:<mnl$} {:<mvl$} {} {}",
-                        //     uds[i].name.bold(),
-                        //     vds[i].yellow(),
-                        //     "->".dimmed(),
-                        //     uds[i].version.green()
-                        // );
                     }
                 }
             }
@@ -147,7 +141,7 @@ impl Cargo {
             fs::write(&self.0, toml::to_string(&content)?)?;
         }
 
-        println!("{}", "=".repeat(40).cyan());
+        utils::style::print_end_msg();
         Ok(())
     }
     pub async fn init_project<S: AsRef<str>>(
@@ -155,8 +149,7 @@ impl Cargo {
         deps: Option<S>,
         ct: ColorType,
     ) -> Result<String> {
-        println!("{}", "INIT".bold().on_cyan());
-        println!("{}", "=".repeat(40).cyan());
+        utils::style::print_start_msg("INIT PROJECT");
 
         let mut newc = Table::new();
 
@@ -212,7 +205,7 @@ impl Cargo {
             }
 
             for (t, ds) in hmdeps {
-                println!("{}", t.to_cargo_field().bold().green());
+                utils::style::print_cargo_field(&t);
 
                 let mut tdeps = Table::new();
                 for d in ds {
@@ -225,13 +218,11 @@ impl Cargo {
             }
         }
 
-        println!("{}", "=".repeat(40).cyan());
-
+        utils::style::print_end_msg();
         Ok(toml::to_string(&newc)?)
     }
     pub async fn append_deps<S: AsRef<str>>(&self, deps: S, ct: ColorType) -> Result<()> {
-        println!("{}", "DEP(S) ADD".bold().on_cyan());
-        println!("{}", "=".repeat(40).cyan());
+        utils::style::print_start_msg("ADD DEP(S)");
 
         let content = fs::read_to_string(&self.0)?;
         let mut content = content.parse::<Table>()?;
@@ -274,7 +265,7 @@ impl Cargo {
         }
 
         for (t, ds) in hmdeps {
-            println!("{}", t.to_cargo_field().bold().green());
+            utils::style::print_cargo_field(&t);
 
             match content.get_mut(&t.to_cargo_field()) {
                 Some(TValue::Table(deps)) => {
@@ -299,13 +290,11 @@ impl Cargo {
 
         fs::write(&self.0, toml::to_string(&content)?)?;
 
-        println!("{}", "=".repeat(40).cyan());
-
+        utils::style::print_end_msg();
         Ok(())
     }
     pub async fn remove_deps<S: AsRef<str>>(&self, names: S, ct: ColorType) -> Result<()> {
-        println!("{}", "DEP(S) REM".bold().on_cyan());
-        println!("{}", "=".repeat(40).cyan());
+        utils::style::print_start_msg("REMOVE DEP(S)");
 
         let mut content = fs::read_to_string(&self.0)?.parse::<Table>()?;
         let names = names.as_ref().trim().split(",").collect::<HashSet<_>>();
@@ -345,7 +334,7 @@ impl Cargo {
                     continue;
                 }
 
-                println!("{}", dtcf.bold().red());
+                utils::style::print_cargo_field_a(&dtype);
                 for d in removed_deps {
                     utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
                 }
@@ -356,8 +345,7 @@ impl Cargo {
             }
         }
 
-        println!("{}", "=".repeat(40).cyan());
-
+        utils::style::print_end_msg();
         fs::write(&self.0, toml::to_string(&content)?)?;
         Ok(())
     }
@@ -368,8 +356,7 @@ impl Cargo {
             .collect()
     }
     pub async fn list(&self, ct: ColorType) -> Result<()> {
-        println!("{}", "DEPS LIST".bold().on_cyan());
-        println!("{}", "=".repeat(40).cyan());
+        utils::style::print_start_msg("LIST DEP(S)");
 
         let content = fs::read_to_string(&self.0)?.parse::<Table>()?;
 
@@ -399,13 +386,13 @@ impl Cargo {
         }
 
         for (t, ds) in hmdeps {
-            println!("{}", t.to_cargo_field().bold().green());
+            utils::style::print_cargo_field(&t);
             for d in ds {
                 utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
             }
         }
 
-        println!("{}", "=".repeat(40).cyan());
+        utils::style::print_end_msg();
         Ok(())
     }
     pub fn from_cur() -> Result<Self> {
