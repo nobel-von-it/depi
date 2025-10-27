@@ -125,6 +125,9 @@ pub mod style {
         println!("{}", "=".repeat(TERMINAL_SIZE.0 as usize).cyan());
     }
 
+    pub fn print_total_dependencies(total: usize) {
+        println!("{} {}", "total:".dimmed(), total.to_string().bold())
+    }
     pub fn print_cargo_field(dtype: &DType) {
         println!("{}", dtype.to_cargo_field().green())
     }

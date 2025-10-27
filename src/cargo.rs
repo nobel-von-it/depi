@@ -364,6 +364,7 @@ impl Cargo {
         let mut mvl = 0;
 
         let mut hmdeps = HashMap::new();
+        let mut total = 0;
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
@@ -381,11 +382,13 @@ impl Cargo {
                         .entry(dtype.clone())
                         .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
                         .or_insert(vec![d]);
+                    total += 1;
                 }
             }
         }
 
         for (t, ds) in hmdeps {
+            utils::style::print_total_dependencies(total);
             utils::style::print_cargo_field(&t);
             for d in ds {
                 utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
