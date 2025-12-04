@@ -18,8 +18,8 @@ fn main() {
 #[clap(about = "Dependencies Manager for Rust Projects", version)]
 enum DepiCommand {
     Init {
-        #[clap(short = 'D', long)]
-        deps: Option<String>,
+        #[clap(short = 'D', long, num_args = 1..)]
+        deps: Option<Vec<String>>,
 
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
@@ -28,14 +28,14 @@ enum DepiCommand {
         #[clap(required = true)]
         name: String,
 
-        #[clap(short = 'D', long)]
-        deps: Option<String>,
+        #[clap(short = 'D', long, num_args = 1..)]
+        deps: Option<Vec<String>>,
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
     },
     Add {
-        #[clap(required = true)]
-        deps: String,
+        #[clap(required = true, num_args = 1..)]
+        deps: Vec<String>,
 
         #[clap(short, long, default_value = "osetia")]
         color: ColorType,
@@ -82,7 +82,8 @@ pub async fn handle_command() -> Result<()> {
     match com {
         DepiCommand::Init { deps, color } => {
             // let cp = Cargo::from_cur()?;
-            let cs = cargo::Cargo::init_project(None, deps.as_deref(), color).await?;
+            let cs = cargo::Cargo::init_project(None, deps.map(|v| v.join("/")).as_deref(), color)
+                .await?;
 
             let mut f = fs::File::create("Cargo.toml")?;
             f.write_all(cs.as_bytes())?;
@@ -95,8 +96,12 @@ pub async fn handle_command() -> Result<()> {
             println!("{}", String::from_utf8(gout)?.bold());
         }
         DepiCommand::New { name, deps, color } => {
-            let cs =
-                cargo::Cargo::init_project(Some(name.as_ref()), deps.as_deref(), color).await?;
+            let cs = cargo::Cargo::init_project(
+                Some(name.as_ref()),
+                deps.map(|v| v.join("/")).as_deref(),
+                color,
+            )
+            .await?;
 
             let name = PathBuf::from(name);
             fs::create_dir(&name)?;
@@ -118,7 +123,7 @@ pub async fn handle_command() -> Result<()> {
         }
         DepiCommand::Add { deps, color } => {
             let cp = cargo::Cargo::from_cur()?;
-            cp.append_deps(deps, color).await?;
+            cp.append_deps(deps.join("/"), color).await?;
         }
         DepiCommand::Remove { names, color } => {
             let cp = cargo::Cargo::from_cur()?;
