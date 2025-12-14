@@ -46,14 +46,75 @@ impl ToString for DType {
 }
 
 #[derive(Debug, Clone)]
-pub struct Dep {
+pub enum Dep {
+    Local(LocDep),
+    External(ExtDep),
+}
+
+impl CargoDep for Dep {
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self> {
+        if let Ok(ext_dep) = ExtDep::from_toml(name.as_ref(), &attrs) {
+            return Ok(Dep::External(ext_dep));
+        } else if let Ok(loc_dep) = LocDep::from_toml(name.as_ref(), &attrs) {
+            return Ok(Dep::Local(loc_dep));
+        }
+        Err(anyhow!("parse error"))
+    }
+    fn to_toml(&self) -> (String, TValue) {
+        match self {
+            Dep::Local(d) => d.to_toml(),
+            Dep::External(d) => d.to_toml(),
+        }
+    }
+}
+
+pub trait CargoDep: Sized {
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self>;
+    fn to_toml(&self) -> (String, TValue);
+}
+
+#[derive(Debug, Clone)]
+pub struct LocDep {
+    pub name: String,
+    pub path: String,
+}
+
+impl CargoDep for LocDep {
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self> {
+        let name = name.as_ref();
+        match attrs {
+            TValue::String(path) => Ok(Self {
+                name: name.to_string(),
+                path: path.to_string(),
+            }),
+            TValue::Table(body) => {
+                let path = if let Some(TValue::String(path)) = body.get("path") {
+                    path.to_string()
+                } else {
+                    return Err(anyhow!("parse error: path"));
+                };
+                Ok(Self {
+                    name: name.to_string(),
+                    path,
+                })
+            }
+            _ => Err(anyhow!("parse error: path")),
+        }
+    }
+    fn to_toml(&self) -> (String, TValue) {
+        (self.name.to_string(), TValue::String(self.path.to_string()))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExtDep {
     pub name: String,
     pub version: String,
     pub features: Option<Vec<String>>,
 }
 
-impl Dep {
-    pub fn from_toml<S: AsRef<str>>(name: S, attrs: TValue) -> Result<Self> {
+impl CargoDep for ExtDep {
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self> {
         let name = name.as_ref();
         match attrs {
             TValue::String(version) => Ok(Self {
@@ -88,7 +149,7 @@ impl Dep {
             _ => Err(anyhow!("parse error: incorrect attrs type")),
         }
     }
-    pub fn to_toml(&self) -> (String, TValue) {
+    fn to_toml(&self) -> (String, TValue) {
         if let Some(fs) = &self.features {
             let mut body = Table::new();
 
@@ -111,6 +172,8 @@ impl Dep {
             )
         }
     }
+}
+impl ExtDep {
     pub async fn update_version(self) -> Result<Self> {
         let fd = api::fetch_crates_dep(&self.name).await?;
         let mut d = self;
@@ -119,7 +182,7 @@ impl Dep {
     }
 }
 
-pub fn normalize(pdep: &parse::PDep, fdep: &api::CratesDep) -> Result<Dep> {
+pub fn normalize(pdep: &parse::PDep, fdep: &api::CratesDep) -> Result<ExtDep> {
     let name = fdep.name.to_string();
     let version = if pdep.version.is_empty() {
         fdep.get_last_version()
@@ -153,7 +216,7 @@ pub fn normalize(pdep: &parse::PDep, fdep: &api::CratesDep) -> Result<Dep> {
         return Err(anyhow!("invalid features, strange"));
     };
 
-    Ok(Dep {
+    Ok(ExtDep {
         name,
         version,
         features,

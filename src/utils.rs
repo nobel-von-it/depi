@@ -62,7 +62,11 @@ impl<S: AsRef<str>> From<S> for DColor {
 pub mod funcs {
     use anyhow::{Result, anyhow};
     use std::{env, fs, path::Path};
+    use toml::Table;
 
+    pub fn get_table<P: AsRef<Path>>(path: P) -> Result<Table> {
+        Ok(fs::read_to_string(path)?.parse::<Table>()?)
+    }
     pub fn current_absolute() -> Result<String> {
         absolutize(env::current_dir().unwrap_or(".".into()))
     }
@@ -142,10 +146,17 @@ pub mod style {
         tabbing: usize,
         dct: DColor,
     ) {
-        let dname = dep.name.as_ref();
-        let dver = dep.version.as_ref();
-        let oldv = oldv.as_ref();
-        print_colored_val_dep_version_update(dname, dver, oldv, mnl, mvl, tabbing, dct);
+        if let Dep::External(d) = dep {
+            print_colored_val_dep_version_update(
+                d.name.as_ref(),
+                d.version.as_ref(),
+                oldv.as_ref(),
+                mnl,
+                mvl,
+                tabbing,
+                dct,
+            );
+        }
     }
     pub fn print_colored_val_dep_version_update<S: AsRef<str>>(
         dname: S,
@@ -212,15 +223,77 @@ pub mod style {
         dep: &Dep,
         mnl: usize,
         mvl: usize,
+        mpl: usize,
         tabbing: usize,
         dct: DColor,
     ) {
-        let dname = &dep.name;
-        let dver = &dep.version;
-        let dfeat = dep.features.as_deref();
-        print_colored_val_dep_full(dname, dver, dfeat, mnl, mvl, tabbing, dct);
+        match dep {
+            Dep::External(d) => {
+                print_colored_val_ext_dep_full(
+                    &d.name,
+                    &d.version,
+                    d.features.as_deref(),
+                    mnl,
+                    mvl,
+                    tabbing,
+                    dct,
+                );
+            }
+            Dep::Local(d) => {
+                print_colored_val_loc_dep_full(&d.name, &d.path, mpl, tabbing, dct);
+            }
+        }
     }
-    pub fn print_colored_val_dep_full<S: AsRef<str>>(
+    pub fn print_colored_val_loc_dep_full<S: AsRef<str>>(
+        dname: S,
+        dpath: S,
+        mpl: usize,
+        tabbing: usize,
+        dct: DColor,
+    ) {
+        let dname = dname.as_ref();
+        let dpath = dpath.as_ref();
+        let prefix = "l* ".dimmed();
+        match dct {
+            DColor::WithoutColor => {
+                println!(
+                    "{}{}{:<mpl$} {}",
+                    " ".repeat(tabbing),
+                    prefix,
+                    dname.bold(),
+                    dpath
+                )
+            }
+            DColor::GOIDA => {
+                println!(
+                    "{}{}{:<mpl$} {}",
+                    " ".repeat(tabbing),
+                    prefix,
+                    dname.bold(),
+                    dpath.red()
+                )
+            }
+            DColor::Osetia => {
+                println!(
+                    "{}{}{:<mpl$} {}",
+                    " ".repeat(tabbing),
+                    prefix,
+                    dname.bold(),
+                    dpath.red()
+                )
+            }
+            DColor::Poland => {
+                println!(
+                    "{}{}{:<mpl$} {}",
+                    " ".repeat(tabbing),
+                    prefix,
+                    dname.bold(),
+                    dpath.red()
+                )
+            }
+        }
+    }
+    pub fn print_colored_val_ext_dep_full<S: AsRef<str>>(
         dname: S,
         dver: S,
         dfeat: Option<&[String]>,
@@ -231,12 +304,14 @@ pub mod style {
     ) {
         let dname = dname.as_ref();
         let dver = dver.as_ref();
+        let prefix = "e* ".dimmed();
         match dct {
             DColor::WithoutColor => {
                 if let Some(fs) = &dfeat {
                     println!(
-                        "{}{:<mnl$} {} {:<mvl$} {} {}",
+                        "{}{}{:<mnl$} {} {:<mvl$} {} {}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname.bold(),
                         "@".dimmed(),
                         &dver,
@@ -245,8 +320,9 @@ pub mod style {
                     );
                 } else {
                     println!(
-                        "{}{:<mnl$} {} {:<mvl$}",
+                        "{}{}{:<mnl$} {} {:<mvl$}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname,
                         "@".dimmed(),
                         &dver
@@ -256,8 +332,9 @@ pub mod style {
             DColor::GOIDA => {
                 if let Some(fs) = &dfeat {
                     println!(
-                        "{}{:<mnl$} {} {:<mvl$} {} {}",
+                        "{}{}{:<mnl$} {} {:<mvl$} {} {}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname.bold(),
                         "@".dimmed(),
                         &dver.blue(),
@@ -266,8 +343,9 @@ pub mod style {
                     );
                 } else {
                     println!(
-                        "{}{:<mnl$} {} {:<mvl$}",
+                        "{}{}{:<mnl$} {} {:<mvl$}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname.bold(),
                         "@".dimmed(),
                         &dver.blue()
@@ -277,8 +355,9 @@ pub mod style {
             DColor::Osetia => {
                 if let Some(fs) = &dfeat {
                     println!(
-                        "{}{:<mnl$} {} {:<mvl$} {} {}",
+                        "{}{}{:<mnl$} {} {:<mvl$} {} {}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname.bold(),
                         "@".dimmed(),
                         &dver.yellow(),
@@ -287,8 +366,9 @@ pub mod style {
                     );
                 } else {
                     println!(
-                        "{}{:<mnl$} {} {:<mvl$}",
+                        "{}{}{:<mnl$} {} {:<mvl$}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname.bold(),
                         "@".dimmed(),
                         &dver.yellow()
@@ -304,8 +384,9 @@ pub mod style {
 
                     let nmvl = mvl - dvrl.len();
                     println!(
-                        "{}{:<mnl$} {} {}{:<nmvl$} {} {}",
+                        "{}{}{:<mnl$} {} {}{:<nmvl$} {} {}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname.bold(),
                         "@".dimmed(),
                         dvrl,
@@ -315,8 +396,9 @@ pub mod style {
                     );
                 } else {
                     println!(
-                        "{}{:<mnl$} {} {:<mvl$}",
+                        "{}{}{:<mnl$} {} {:<mvl$}",
                         " ".repeat(tabbing),
+                        prefix,
                         &dname.bold(),
                         "@".dimmed(),
                         &dver.red()
