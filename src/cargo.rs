@@ -1,31 +1,48 @@
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 use std::path::Path;
 use std::{fs, path::PathBuf};
 
 use anyhow::{Result, anyhow};
-use colored::Colorize;
 use futures::future;
 use log::info;
 use toml::Table;
 use toml::Value as TValue;
 
+use crate::dep::{CargoDep, Dep};
 use crate::storage;
-use crate::utils::DColor;
 use crate::{
-    dep::{self, DType, Dep},
+    dep::{self, DType, ExtDep},
     utils::{self, ColorType},
 };
+
+const SECTION_ORDER: [&str; 16] = [
+    "package",
+    "workspace",
+    "lib",
+    "bin",
+    "example",
+    "test",
+    "bench",
+    "features",
+    "dependencies",
+    "dev-dependencies",
+    "build-dependencies",
+    "target",
+    "patch",
+    "replace",
+    "profile",
+    "badges",
+];
 
 pub struct Cargo(pub PathBuf);
 
 impl Cargo {
-    pub fn update_dep_type(deps: &Table) -> Result<(Vec<Dep>, Vec<String>)> {
+    pub fn update_dep_type(deps: &Table) -> Result<(Vec<ExtDep>, Vec<String>)> {
         let mut fds = Vec::new();
         let mut vds = Vec::new();
         info!("init feature and and old version vector");
         for (k, v) in deps {
-            let d = Dep::from_toml(k, v.clone())?;
+            let d = ExtDep::from_toml(k, v)?;
             vds.push(d.version.clone());
             fds.push(d);
         }
@@ -121,8 +138,9 @@ impl Cargo {
                 }
                 for i in 0..uds.len() {
                     if uds[i].version > vds[i] {
+                        let dep = Dep::External(uds[i].clone());
                         utils::style::print_colored_ref_dep_version_update(
-                            &uds[i],
+                            &dep,
                             &vds[i],
                             mnl,
                             mvl,
@@ -138,7 +156,7 @@ impl Cargo {
         info!("skip saving");
         if real_updated > 0 {
             info!("saving changes...");
-            fs::write(&self.0, toml::to_string(&content)?)?;
+            self.save(content)?;
         }
 
         utils::style::print_end_msg();
@@ -200,8 +218,8 @@ impl Cargo {
                 }
                 hmdeps
                     .entry(DType::from(&pdeps[i].target))
-                    .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
-                    .or_insert(vec![d]);
+                    .and_modify(|tds: &mut Vec<Dep>| tds.push(Dep::External(d.clone())))
+                    .or_insert(vec![Dep::External(d)]);
             }
 
             for (t, ds) in hmdeps {
@@ -209,7 +227,7 @@ impl Cargo {
 
                 let mut tdeps = Table::new();
                 for d in ds {
-                    utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
+                    utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 0, 2, ct.get_dcolor());
                     let (name, attrs) = d.to_toml();
                     tdeps.insert(name, attrs);
                 }
@@ -260,8 +278,8 @@ impl Cargo {
 
             hmdeps
                 .entry(DType::from(&pdeps[i].target))
-                .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
-                .or_insert(vec![d]);
+                .and_modify(|tds: &mut Vec<Dep>| tds.push(Dep::External(d.clone())))
+                .or_insert(vec![Dep::External(d)]);
         }
 
         for (t, ds) in hmdeps {
@@ -270,7 +288,14 @@ impl Cargo {
             match content.get_mut(&t.to_cargo_field()) {
                 Some(TValue::Table(deps)) => {
                     for d in ds {
-                        utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
+                        utils::style::print_colored_ref_dep_full(
+                            &d,
+                            mnl,
+                            mvl,
+                            0,
+                            2,
+                            ct.get_dcolor(),
+                        );
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -279,7 +304,14 @@ impl Cargo {
                 None => {
                     let mut deps = Table::new();
                     for d in ds {
-                        utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
+                        utils::style::print_colored_ref_dep_full(
+                            &d,
+                            mnl,
+                            mvl,
+                            0,
+                            2,
+                            ct.get_dcolor(),
+                        );
                         let (name, attrs) = d.to_toml();
                         deps.insert(name, attrs);
                     }
@@ -288,9 +320,9 @@ impl Cargo {
             }
         }
 
-        fs::write(&self.0, toml::to_string(&content)?)?;
-
         utils::style::print_end_msg();
+        self.save(content)?;
+
         Ok(())
     }
     pub async fn remove_deps<S: AsRef<str>>(&self, names: S, ct: ColorType) -> Result<()> {
@@ -299,20 +331,31 @@ impl Cargo {
         let mut content = fs::read_to_string(&self.0)?.parse::<Table>()?;
         let names = names.as_ref().trim().split(",").collect::<HashSet<_>>();
 
-        let mut mnl = 0;
-        let mut mvl = 0;
+        let mut e_mnl = 0;
+        let mut e_mvl = 0;
+
+        let mut l_mpl = 0;
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
             if let Some(TValue::Table(deps)) = content.get(&dtcf) {
                 for (k, v) in deps.iter() {
                     if names.contains(&k.as_str()) {
-                        let d = Dep::from_toml(k, v.clone())?;
-                        if d.name.len() > mnl {
-                            mnl = d.name.len();
-                        }
-                        if d.version.len() > mvl {
-                            mvl = d.version.len();
+                        let d = Dep::from_toml(k, v)?;
+                        match &d {
+                            Dep::External(e_d) => {
+                                if e_d.name.len() > e_mnl {
+                                    e_mnl = e_d.name.len();
+                                }
+                                if e_d.version.len() > e_mvl {
+                                    e_mvl = e_d.version.len();
+                                }
+                            }
+                            Dep::Local(l_d) => {
+                                if l_d.name.len() > l_mpl {
+                                    l_mpl = l_d.name.len();
+                                }
+                            }
                         }
                     }
                 }
@@ -325,7 +368,7 @@ impl Cargo {
                 let mut removed_deps = Vec::new();
                 for (k, v) in deps.iter() {
                     if names.contains(&k.as_str()) {
-                        let d = Dep::from_toml(k, v.clone())?;
+                        let d = Dep::from_toml(k, v)?;
                         removed_deps.push(d);
                     }
                 }
@@ -336,7 +379,14 @@ impl Cargo {
 
                 utils::style::print_cargo_field_a(&dtype);
                 for d in removed_deps {
-                    utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
+                    utils::style::print_colored_ref_dep_full(
+                        &d,
+                        e_mnl,
+                        e_mvl,
+                        l_mpl,
+                        2,
+                        ct.get_dcolor(),
+                    );
                 }
                 deps.retain(|k, _| !names.contains(&k));
                 if deps.is_empty() {
@@ -346,22 +396,25 @@ impl Cargo {
         }
 
         utils::style::print_end_msg();
-        fs::write(&self.0, toml::to_string(&content)?)?;
+
+        self.save(content)?;
         Ok(())
     }
     async fn _get_deps_from_value(t: &Table) -> Vec<Dep> {
         t.iter()
-            .map(|(dk, dv)| Dep::from_toml(dk, dv.clone()))
+            .map(|(dk, dv)| Dep::from_toml(dk, dv))
             .flatten()
             .collect()
     }
     pub async fn list(&self, ct: ColorType) -> Result<()> {
         utils::style::print_start_msg("LIST DEP(S)");
 
-        let content = fs::read_to_string(&self.0)?.parse::<Table>()?;
+        let content = utils::funcs::get_table(&self.0)?;
 
-        let mut mnl = 0;
-        let mut mvl = 0;
+        let mut e_mnl = 0;
+        let mut e_mvl = 0;
+
+        let mut l_mpl = 0;
 
         let mut hmdeps = HashMap::new();
         let mut total = 0;
@@ -370,14 +423,22 @@ impl Cargo {
             let dtcf = dtype.to_cargo_field();
             if let Some(TValue::Table(deps)) = content.get(&dtcf) {
                 for (n, ats) in deps {
-                    let d = Dep::from_toml(n, ats.clone())?;
-                    if mnl < d.name.len() {
-                        mnl = d.name.len();
+                    let d = Dep::from_toml(n, ats)?;
+                    match &d {
+                        Dep::External(e_d) => {
+                            if e_mnl < e_d.name.len() {
+                                e_mnl = e_d.name.len();
+                            }
+                            if e_mvl < e_d.version.len() {
+                                e_mvl = e_d.version.len();
+                            }
+                        }
+                        Dep::Local(l_d) => {
+                            if l_mpl < l_d.path.len() {
+                                l_mpl = l_d.path.len();
+                            }
+                        }
                     }
-                    if mvl < d.version.len() {
-                        mvl = d.version.len();
-                    }
-
                     hmdeps
                         .entry(dtype.clone())
                         .and_modify(|tds: &mut Vec<Dep>| tds.push(d.clone()))
@@ -390,8 +451,29 @@ impl Cargo {
         for (t, ds) in hmdeps {
             utils::style::print_total_dependencies(total);
             utils::style::print_cargo_field(&t);
-            for d in ds {
-                utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 2, ct.get_dcolor());
+            for d in &ds {
+                if let Dep::External(e_d) = d {
+                    utils::style::print_colored_val_ext_dep_full(
+                        &e_d.name,
+                        &e_d.version,
+                        e_d.features.as_deref(),
+                        e_mnl,
+                        e_mvl,
+                        2,
+                        ct.get_dcolor(),
+                    );
+                }
+            }
+            for d in &ds {
+                if let Dep::Local(l_d) = d {
+                    utils::style::print_colored_val_loc_dep_full(
+                        &l_d.name,
+                        &l_d.path,
+                        l_mpl,
+                        2,
+                        ct.get_dcolor(),
+                    );
+                }
             }
         }
 
@@ -414,5 +496,26 @@ impl Cargo {
             return Self::find_cargo_file(parent);
         }
         Err(anyhow!("cargo not found"))
+    }
+    fn save(&self, mut content: Table) -> Result<()> {
+        let mut sorted_content = Table::with_capacity(content.len());
+
+        for section in SECTION_ORDER {
+            if let Some(v) = content.remove(section) {
+                sorted_content.insert(section.to_string(), v);
+            }
+        }
+
+        let remaining_keys = content.keys().map(String::from).collect::<Vec<_>>();
+        for key in remaining_keys {
+            if let Some(value) = content.remove(&key) {
+                sorted_content.insert(key, value);
+            }
+        }
+
+        let toml_string = toml::to_string(&sorted_content)?;
+        fs::write(&self.0, toml_string)?;
+
+        Ok(())
     }
 }
