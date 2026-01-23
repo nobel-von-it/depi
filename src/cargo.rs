@@ -5,8 +5,7 @@ use std::{fs, path::PathBuf};
 use anyhow::{Result, anyhow};
 use futures::future;
 use log::info;
-use toml::Table;
-use toml::Value as TValue;
+use toml_edit::{DocumentMut, Formatted, Item, Table, Value};
 
 use crate::dep::{CargoDep, Dep};
 use crate::storage;
@@ -54,14 +53,14 @@ impl Cargo {
 
         info!("parsing Cargo.toml file...");
         let content = fs::read_to_string(&self.0)?;
-        let mut content = content.parse::<Table>()?;
+        let mut doc = content.parse::<DocumentMut>()?;
         info!("parsed successfully");
 
         let mut futures = Vec::new();
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
-            if let Some(TValue::Table(deps)) = content.get(dtcf.as_str()) {
+            if let Some(Item::Table(deps)) = doc.get(&dtcf) {
                 info!("fetching {} field", &dtcf);
                 futures.push(async move {
                     let (fds, vds) = Self::update_dep_type(&deps)?;
@@ -109,12 +108,12 @@ impl Cargo {
 
             let dtcf = dtype.to_cargo_field();
 
-            if let Some(TValue::Table(deps)) = content.get_mut(&dtcf) {
+            if let Some(Item::Table(deps)) = doc.get_mut(&dtcf) {
                 info!("updating {} field", &dtcf);
                 let mut ndeps = Table::new();
                 for ud in &uds {
                     let (name, attrs) = ud.to_toml();
-                    ndeps.insert(name, attrs);
+                    ndeps.insert(&name, attrs);
                 }
                 *deps = ndeps;
             }
@@ -156,7 +155,7 @@ impl Cargo {
         info!("skip saving");
         if real_updated > 0 {
             info!("saving changes...");
-            self.save(content)?;
+            fs::write(&self.0, doc.to_string())?;
         }
 
         utils::style::print_end_msg();
@@ -179,11 +178,12 @@ impl Cargo {
             utils::funcs::current_absolute()?
         };
 
-        project.insert("name".to_string(), TValue::String(project_name));
-        project.insert("version".to_string(), TValue::String("0.1.0".to_string()));
-        project.insert("edition".to_string(), TValue::String("2024".to_string()));
+        let str_val = |s: &str| Item::Value(Value::String(Formatted::new(s.to_string())));
+        project.insert("name", str_val(&project_name));
+        project.insert("version", str_val("0.1.0"));
+        project.insert("edition", str_val("2024"));
 
-        newc.insert("package".to_string(), TValue::Table(project));
+        newc.insert("package", Item::Table(project));
 
         if let Some(deps) = deps {
             let a_s = storage::AliasStorage::load()?;
@@ -229,21 +229,21 @@ impl Cargo {
                 for d in ds {
                     utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 0, 2, ct.get_dcolor());
                     let (name, attrs) = d.to_toml();
-                    tdeps.insert(name, attrs);
+                    tdeps.insert(&name, attrs);
                 }
 
-                newc.insert(t.to_cargo_field(), TValue::Table(tdeps));
+                newc.insert(&t.to_cargo_field(), Item::Table(tdeps));
             }
         }
 
         utils::style::print_end_msg();
-        Ok(toml::to_string(&newc)?)
+        Ok(newc.to_string())
     }
     pub async fn append_deps<S: AsRef<str>>(&self, deps: S, ct: ColorType) -> Result<()> {
         utils::style::print_start_msg("ADD DEP(S)");
 
         let content = fs::read_to_string(&self.0)?;
-        let mut content = content.parse::<Table>()?;
+        let mut doc = content.parse::<DocumentMut>()?;
 
         let a_s = storage::AliasStorage::load()?;
         let pdeps = dep::parse::parse_deps(deps.as_ref(), a_s.list())?;
@@ -284,51 +284,30 @@ impl Cargo {
 
         for (t, ds) in hmdeps {
             utils::style::print_cargo_field(&t);
+            let section_key = t.to_cargo_field();
+            let section = doc.entry(&section_key).or_insert(Item::Table(Table::new()));
 
-            match content.get_mut(&t.to_cargo_field()) {
-                Some(TValue::Table(deps)) => {
-                    for d in ds {
-                        utils::style::print_colored_ref_dep_full(
-                            &d,
-                            mnl,
-                            mvl,
-                            0,
-                            2,
-                            ct.get_dcolor(),
-                        );
-                        let (name, attrs) = d.to_toml();
-                        deps.insert(name, attrs);
-                    }
-                }
-                Some(_) => println!("tipatipitiritoutou"),
-                None => {
-                    let mut deps = Table::new();
-                    for d in ds {
-                        utils::style::print_colored_ref_dep_full(
-                            &d,
-                            mnl,
-                            mvl,
-                            0,
-                            2,
-                            ct.get_dcolor(),
-                        );
-                        let (name, attrs) = d.to_toml();
-                        deps.insert(name, attrs);
-                    }
-                    content.insert(t.to_cargo_field(), TValue::Table(deps));
-                }
+            let deps_table = section
+                .as_table_mut()
+                .ok_or_else(|| anyhow!("Section [{}] is not a table", section_key))?;
+
+            for d in ds {
+                utils::style::print_colored_ref_dep_full(&d, mnl, mvl, 0, 2, ct.get_dcolor());
+                let (name, attrs) = d.to_toml();
+                deps_table.insert(&name, attrs);
             }
         }
 
         utils::style::print_end_msg();
-        self.save(content)?;
+        fs::write(&self.0, doc.to_string())?;
 
         Ok(())
     }
     pub async fn remove_deps<S: AsRef<str>>(&self, names: S, ct: ColorType) -> Result<()> {
         utils::style::print_start_msg("REMOVE DEP(S)");
 
-        let mut content = fs::read_to_string(&self.0)?.parse::<Table>()?;
+        let content = fs::read_to_string(&self.0)?;
+        let mut doc = content.parse::<DocumentMut>()?;
         let names = names.as_ref().trim().split(",").collect::<HashSet<_>>();
 
         let mut e_mnl = 0;
@@ -338,9 +317,9 @@ impl Cargo {
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
-            if let Some(TValue::Table(deps)) = content.get(&dtcf) {
+            if let Some(Item::Table(deps)) = doc.get(&dtcf) {
                 for (k, v) in deps.iter() {
-                    if names.contains(&k.as_str()) {
+                    if names.contains(&k) {
                         let d = Dep::from_toml(k, v)?;
                         match &d {
                             Dep::External(e_d) => {
@@ -364,10 +343,10 @@ impl Cargo {
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
-            if let Some(TValue::Table(deps)) = content.get_mut(&dtcf) {
+            if let Some(Item::Table(deps)) = doc.get_mut(&dtcf) {
                 let mut removed_deps = Vec::new();
                 for (k, v) in deps.iter() {
-                    if names.contains(&k.as_str()) {
+                    if names.contains(&k) {
                         let d = Dep::from_toml(k, v)?;
                         removed_deps.push(d);
                     }
@@ -390,14 +369,14 @@ impl Cargo {
                 }
                 deps.retain(|k, _| !names.contains(&k));
                 if deps.is_empty() {
-                    content.remove(&dtcf);
+                    doc.remove(&dtcf);
                 }
             }
         }
 
         utils::style::print_end_msg();
 
-        self.save(content)?;
+        fs::write(&self.0, doc.to_string())?;
         Ok(())
     }
     async fn _get_deps_from_value(t: &Table) -> Vec<Dep> {
@@ -409,7 +388,8 @@ impl Cargo {
     pub async fn list(&self, ct: ColorType) -> Result<()> {
         utils::style::print_start_msg("LIST DEP(S)");
 
-        let content = utils::funcs::get_table(&self.0)?;
+        let content = fs::read_to_string(&self.0)?;
+        let doc = content.parse::<DocumentMut>()?;
 
         let mut e_mnl = 0;
         let mut e_mvl = 0;
@@ -421,7 +401,7 @@ impl Cargo {
 
         for dtype in [DType::Normal, DType::Dev, DType::Build] {
             let dtcf = dtype.to_cargo_field();
-            if let Some(TValue::Table(deps)) = content.get(&dtcf) {
+            if let Some(Item::Table(deps)) = doc.get(&dtcf) {
                 for (n, ats) in deps {
                     let d = Dep::from_toml(n, ats)?;
                     match &d {
@@ -496,26 +476,5 @@ impl Cargo {
             return Self::find_cargo_file(parent);
         }
         Err(anyhow!("cargo not found"))
-    }
-    fn save(&self, mut content: Table) -> Result<()> {
-        let mut sorted_content = Table::with_capacity(content.len());
-
-        for section in SECTION_ORDER {
-            if let Some(v) = content.remove(section) {
-                sorted_content.insert(section.to_string(), v);
-            }
-        }
-
-        let remaining_keys = content.keys().map(String::from).collect::<Vec<_>>();
-        for key in remaining_keys {
-            if let Some(value) = content.remove(&key) {
-                sorted_content.insert(key, value);
-            }
-        }
-
-        let toml_string = toml::to_string(&sorted_content)?;
-        fs::write(&self.0, toml_string)?;
-
-        Ok(())
     }
 }

@@ -64,9 +64,6 @@ pub mod funcs {
     use std::{env, fs, path::Path};
     use toml::Table;
 
-    pub fn get_table<P: AsRef<Path>>(path: P) -> Result<Table> {
-        Ok(fs::read_to_string(path)?.parse::<Table>()?)
-    }
     pub fn current_absolute() -> Result<String> {
         absolutize(env::current_dir().unwrap_or(".".into()))
     }

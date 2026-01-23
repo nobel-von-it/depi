@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use toml::{Table, Value as TValue, value::Array};
+use toml_edit::{Array, Formatted, Item, Table, Value};
 
 #[derive(Hash, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DType {
@@ -52,7 +52,7 @@ pub enum Dep {
 }
 
 impl CargoDep for Dep {
-    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self> {
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &Item) -> Result<Self> {
         if let Ok(ext_dep) = ExtDep::from_toml(name.as_ref(), &attrs) {
             return Ok(Dep::External(ext_dep));
         } else if let Ok(loc_dep) = LocDep::from_toml(name.as_ref(), &attrs) {
@@ -60,7 +60,7 @@ impl CargoDep for Dep {
         }
         Err(anyhow!("parse error"))
     }
-    fn to_toml(&self) -> (String, TValue) {
+    fn to_toml(&self) -> (String, Item) {
         match self {
             Dep::Local(d) => d.to_toml(),
             Dep::External(d) => d.to_toml(),
@@ -69,8 +69,8 @@ impl CargoDep for Dep {
 }
 
 pub trait CargoDep: Sized {
-    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self>;
-    fn to_toml(&self) -> (String, TValue);
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &Item) -> Result<Self>;
+    fn to_toml(&self) -> (String, Item);
 }
 
 #[derive(Debug, Clone)]
@@ -80,15 +80,15 @@ pub struct LocDep {
 }
 
 impl CargoDep for LocDep {
-    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self> {
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &Item) -> Result<Self> {
         let name = name.as_ref();
         match attrs {
-            TValue::String(path) => Ok(Self {
+            Item::Value(Value::String(path)) => Ok(Self {
                 name: name.to_string(),
                 path: path.to_string(),
             }),
-            TValue::Table(body) => {
-                let path = if let Some(TValue::String(path)) = body.get("path") {
+            Item::Table(body) => {
+                let path = if let Some(Item::Value(Value::String(path))) = body.get("path") {
                     path.to_string()
                 } else {
                     return Err(anyhow!("parse error: path"));
@@ -101,8 +101,9 @@ impl CargoDep for LocDep {
             _ => Err(anyhow!("parse error: path")),
         }
     }
-    fn to_toml(&self) -> (String, TValue) {
-        (self.name.to_string(), TValue::String(self.path.to_string()))
+    fn to_toml(&self) -> (String, Item) {
+        let path = Formatted::new(self.path.to_string());
+        (self.name.to_string(), Item::Value(Value::String(path)))
     }
 }
 
@@ -114,25 +115,26 @@ pub struct ExtDep {
 }
 
 impl CargoDep for ExtDep {
-    fn from_toml<S: AsRef<str>>(name: S, attrs: &TValue) -> Result<Self> {
+    fn from_toml<S: AsRef<str>>(name: S, attrs: &Item) -> Result<Self> {
         let name = name.as_ref();
         match attrs {
-            TValue::String(version) => Ok(Self {
+            Item::Value(Value::String(version)) => Ok(Self {
                 name: name.to_string(),
                 version: version.to_string(),
                 features: None,
             }),
-            TValue::Table(body) => {
-                let version = if let Some(TValue::String(version)) = body.get("version") {
+            Item::Table(body) => {
+                let version = if let Some(Item::Value(Value::String(version))) = body.get("version")
+                {
                     version.to_string()
                 } else {
                     return Err(anyhow!("parse error: version"));
                 };
 
                 let mut fs = Vec::new();
-                if let Some(TValue::Array(afs)) = body.get("features") {
+                if let Some(Item::Value(Value::Array(afs))) = body.get("features") {
                     for f in afs {
-                        if let TValue::String(f) = f {
+                        if let Value::String(f) = f {
                             fs.push(f.to_string())
                         }
                     }
@@ -149,26 +151,26 @@ impl CargoDep for ExtDep {
             _ => Err(anyhow!("parse error: incorrect attrs type")),
         }
     }
-    fn to_toml(&self) -> (String, TValue) {
+    fn to_toml(&self) -> (String, Item) {
         if let Some(fs) = &self.features {
             let mut body = Table::new();
 
             let mut afs = Array::new();
             for f in fs {
-                afs.push(TValue::String(f.to_string()))
+                afs.push(Value::String(Formatted::new(f.to_string())))
             }
 
             body.insert(
-                "version".to_string(),
-                TValue::String(self.version.to_string()),
+                "version",
+                Item::Value(Value::String(Formatted::new(self.version.to_string()))),
             );
-            body.insert("features".to_string(), TValue::Array(afs));
+            body.insert("features", Item::Value(Value::Array(afs)));
 
-            (self.name.to_string(), TValue::Table(body))
+            (self.name.to_string(), Item::Table(body))
         } else {
             (
                 self.name.to_string(),
-                TValue::String(self.version.to_string()),
+                Item::Value(Value::String(Formatted::new(self.version.to_string()))),
             )
         }
     }
